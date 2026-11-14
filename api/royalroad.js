@@ -97,12 +97,12 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: false, error: "Royal Road did not return a readable Latest Updates page." });
       }
       const found = new Map();
-      for (const match of html.matchAll(/<a\\b[^>]*href\\s*=\\s*["']([^"']*\\/fiction\\/\\d+(?:\\/[^"'?#]*)?(?:\\?[^"']*)?)["'][^>]*>([\\s\\S]*?)<\\/a>/gi)) {
+      for (const match of html.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']*\/fiction\/\d+(?:\/[^"'?#]*)?(?:\?[^"']*)?)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
         let fictionUrl;
         try {
           fictionUrl = new URL(decode(match[1]), "https://www.royalroad.com");
         } catch { continue; }
-        if (!allowedHost(fictionUrl.hostname) || !/^\\/fiction\\/\\d+(?:\\/|$)/i.test(fictionUrl.pathname)) continue;
+        if (!allowedHost(fictionUrl.hostname) || !/^\/fiction\/\d+(?:\/|$)/i.test(fictionUrl.pathname)) continue;
         fictionUrl.search = "";
         fictionUrl.hash = "";
         const canonical = "https://www.royalroad.com" + fictionUrl.pathname;
