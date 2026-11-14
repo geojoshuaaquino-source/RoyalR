@@ -47,7 +47,7 @@ const getUserMetric = (novel: UserNovel, snapshot: UserSnapshot | undefined, key
   if (key === 'f') return snapshot.followers
   if (key === 'fav') return snapshot.favorites
   if (key === 'rc') return snapshot.rating_count
-  if (key === 'r') return snapshot.rating
+  if (key === 'r') return snapshot.rating ?? rawMetric('overall_score', 'overallScore')
   const raw = snapshot.raw_data || {}
   const rawMetric = (...keys: string[]) => {
     for (const name of keys) {
@@ -233,6 +233,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel, onCreateNovel
         try {
           const metrics=Object.fromEntries(Object.entries(draftMetrics).map(([k,v])=>[k,v.trim()===''?null:Number(v)]))
           if(Object.values(metrics).some(v=>v!==null && (!Number.isFinite(v as number) || (v as number)<0))) throw new Error('Metrics must be non-negative numbers.')
+          if(metrics.rating != null && metrics.rating > 5) throw new Error('Overall rating must be between 0 and 5.')
           const id=await onCreateNovel({title:draftTitle.trim(),url:draftUrl.trim(),publishedAt:draftPublishedAt,genre:draftGenre.trim(),tags:draftTags,metrics})
           setSelectedNovelId(id); setCreateOpen(false); setDraftTitle(''); setDraftUrl(''); setDraftPublishedAt(''); setDraftGenre(''); setDraftTags(''); setDraftMetrics({})
         } catch(error) { setCreateError(error instanceof Error?error.message:'Could not save this novel.') }
