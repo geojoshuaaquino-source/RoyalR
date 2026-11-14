@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
 
 type UserNovel = { id: string; title: string; fiction_url: string; published_at: string | null; page_count: number | null; chapter_count: number | null }
-type UserSnapshot = { views: number | null; average_views: number | null; followers: number | null; favorites: number | null; rating: number | null; rating_count: number | null; chapters: number | null; pages: number | null; captured_at: string }
+type UserSnapshot = { views: number | null; average_views: number | null; followers: number | null; favorites: number | null; rating: number | null; rating_count: number | null; chapters: number | null; pages: number | null; raw_data: Record<string, unknown> | null; captured_at: string }
 type Row = { age: number; v: number | null; av: number | null; f: number | null; fav: number | null; rc: number | null; p: number | null; w: number | null; ch: number | null; r: number | null; st: number | null; sr: number | null; g: number | null; c: number | null; genres: string[]; tags: string[]; status: string; fictionType: string }
 type Metric = { key: string; label: string; short: string; log?: boolean }
 const METRICS: Metric[] = [
@@ -48,6 +48,27 @@ const getUserMetric = (novel: UserNovel, snapshot: UserSnapshot | undefined, key
   if (key === 'fav') return snapshot.favorites
   if (key === 'rc') return snapshot.rating_count
   if (key === 'r') return snapshot.rating
+  const raw = snapshot.raw_data || {}
+  const rawMetric = (...keys: string[]) => {
+    for (const name of keys) {
+      const value = raw[name]
+      if (value !== undefined && value !== null && value !== '') {
+        const number = Number(value)
+        if (Number.isFinite(number)) return number
+      }
+    }
+    return null
+  }
+  if (key === 'w') return rawMetric('word_count', 'wordCount', 'words')
+  if (key === 'st') return rawMetric('style_score', 'styleScore')
+  if (key === 'sr') return rawMetric('story_score', 'storyScore')
+  if (key === 'g') return rawMetric('grammar_score', 'grammarScore')
+  if (key === 'c') return rawMetric('character_score', 'characterScore')
+  if (key === 'wordsPerPage') {
+    const words = rawMetric('word_count', 'wordCount', 'words')
+    const pages = snapshot.pages ?? novel.page_count
+    return words != null && pages && pages > 0 ? words / pages : null
+  }
   if (key === 'followRate') return snapshot.average_views && snapshot.average_views > 0 && snapshot.followers != null ? snapshot.followers / snapshot.average_views * 100 : null
   return null
 }
