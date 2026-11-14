@@ -149,9 +149,12 @@ export default function App() {
     const errors: { user_id: string; run_id: string; row_number: number; fiction_url: string | null; error_code: string; error_message: string; raw_row: ImportRow }[] = []
     const records: any[] = []
     const sourceRows: { row: ImportRow; url: string }[] = []
+    const seenUrls = new Set<string>()
     preview.forEach((row, i) => {
       const url = urlValue(row.url ?? row.fiction_url)
       if (!url) { skipped++; errors.push({ user_id: uid, run_id: runId, row_number: i + 2, fiction_url: null, error_code: 'INVALID_URL', error_message: 'Missing or invalid Royal Road fiction URL.', raw_row: row }); return }
+      if (seenUrls.has(url)) { skipped++; errors.push({ user_id: uid, run_id: runId, row_number: i + 2, fiction_url: url, error_code: 'DUPLICATE_URL', error_message: 'Duplicate URL within this CSV batch; first occurrence was kept.', raw_row: row }); return }
+      seenUrls.add(url)
       const title = textValue(row.title) || url.split('/').filter(Boolean).pop()?.replace(/-/g, ' ') || 'Untitled novel'
       const tags = textValue(row.tags)?.split(/[;,]/).map(x => x.trim()).filter(Boolean) || []
       records.push({ user_id: uid, fiction_url: url, title, author_name: textValue(row.author ?? row.author_name), published_at: textValue(row.published_at), genre: textValue(row.genre), tags, publication_status: textValue(row.status ?? row.publication_status), chapter_count: numberValue(row.chapters ?? row.chapter_count), page_count: numberValue(row.pages ?? row.page_count), last_seen_at: new Date().toISOString() })
