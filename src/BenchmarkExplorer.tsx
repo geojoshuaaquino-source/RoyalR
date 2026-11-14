@@ -47,6 +47,7 @@ const getUserMetric = (novel: UserNovel, snapshot: UserSnapshot | undefined, key
   if (key === 'f') return snapshot.followers
   if (key === 'fav') return snapshot.favorites
   if (key === 'rc') return snapshot.rating_count
+  if (key === 'r') return snapshot.rating
   if (key === 'followRate') return snapshot.average_views && snapshot.average_views > 0 && snapshot.followers != null ? snapshot.followers / snapshot.average_views * 100 : null
   return null
 }
@@ -72,6 +73,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
   const [genreFilter, setGenreFilter] = useState('All genres')
   const [typeFilter, setTypeFilter] = useState('All types')
   const [statusFilter, setStatusFilter] = useState('All statuses')
+  const [tagFilter, setTagFilter] = useState('All tags')
   const [loadError, setLoadError] = useState('')
   const [metricKey, setMetricKey] = useState('f')
   const [ageFilter, setAgeFilter] = useState('all')
@@ -123,8 +125,9 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
   const genres = [...new Set(baseline.flatMap(r => r.genres || []))].sort()
   const types = [...new Set(baseline.map(r => r.fictionType).filter(Boolean))].sort()
   const statuses = [...new Set(baseline.map(r => r.status).filter(Boolean))].sort()
-  const categoryFiltered = baseline.filter(r => (genreFilter === 'All genres' || r.genres.includes(genreFilter)) && (typeFilter === 'All types' || r.fictionType === typeFilter) && (statusFilter === 'All statuses' || r.status === statusFilter))
-  const filtered = useMemo(() => categoryFiltered.filter(r => activeAge.test(r.age)), [baseline, activeAge, genreFilter, typeFilter, statusFilter])
+  const tags = [...new Set(baseline.flatMap(r => r.tags || []))].sort()
+  const categoryFiltered = baseline.filter(r => (genreFilter === 'All genres' || r.genres.includes(genreFilter)) && (typeFilter === 'All types' || r.fictionType === typeFilter) && (statusFilter === 'All statuses' || r.status === statusFilter) && (tagFilter === 'All tags' || r.tags.includes(tagFilter)))
+  const filtered = useMemo(() => categoryFiltered.filter(r => activeAge.test(r.age)), [baseline, activeAge, genreFilter, typeFilter, statusFilter, tagFilter])
   const metric = METRICS.find(m => m.key === metricKey) || METRICS[2]
   const values = filtered.map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
   const ownValue = selectedNovel ? getUserMetric(selectedNovel, selectedSnapshot, metricKey) : null
@@ -187,6 +190,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
         <label>Genre category<select value={genreFilter} onChange={e=>setGenreFilter(e.target.value)}><option>All genres</option>{genres.map(g=><option key={g}>{g}</option>)}</select></label>
         <label>Fiction type<select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}><option>All types</option>{types.map(t=><option key={t}>{t}</option>)}</select></label>
         <label>Publication status<select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option>All statuses</option>{statuses.map(s=><option key={s}>{s}</option>)}</select></label>
+        <label>Tag<select value={tagFilter} onChange={e=>setTagFilter(e.target.value)}><option>All tags</option>{tags.map(t=><option key={t}>{t}</option>)}</select></label>
         <label>Novel to compare<select value={selectedNovelId} onChange={e=>setSelectedNovelId(e.target.value)}><option value="">Select a novel</option>{novels.map(n=><option key={n.id} value={n.id}>{n.title}</option>)}</select></label>
         <label>Metric<select value={metricKey} onChange={e=>setMetricKey(e.target.value)}>{METRICS.map(m=><option key={m.key} value={m.key}>{m.label}</option>)}</select></label>
         <label>Age cohort<select value={ageFilter} onChange={e=>setAgeFilter(e.target.value)}>{AGE_FILTERS.map(a=><option key={a.value} value={a.value}>{a.label}</option>)}</select></label>
