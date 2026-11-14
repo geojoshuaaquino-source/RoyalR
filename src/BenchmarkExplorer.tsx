@@ -83,14 +83,14 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: {
 
 
   const scored = useMemo(() => {
-    const eligible = novels.filter(n => !n.fiction_url.includes('/fiction/183032') && !n.title.toLowerCase().includes('dungeons in denver'))
-    const rows = eligible.map(novel => {
+    const isExcludedFromPeerPool = (novel: UserNovel) => novel.fiction_url.includes('/fiction/183032') || novel.title.toLowerCase().includes('dungeons in denver')
+    const rows = novels.map(novel => {
       const snapshot = latestByNovel.get(novel.id)
       const values = Object.fromEntries(METRICS.map(m => [m.key, metricValue(novel, snapshot, m.key)])) as Record<MetricKey, number | null>
       return { novel, snapshot, age: ageOf(novel.published_at), values, score: null as number | null, percentile: null as number | null, coverage: 0, grade: 'N/A' }
     })
     for (const component of SCORE_WEIGHTS) {
-      const available = rows.map(r => r.values[component.key]).filter((v): v is number => v != null && Number.isFinite(v))
+      const available = rows.filter(r => !isExcludedFromPeerPool(r.novel)).map(r => r.values[component.key]).filter((v): v is number => v != null && Number.isFinite(v))
       for (const row of rows) {
         const value = row.values[component.key]
         if (value == null || !available.length) continue
@@ -108,7 +108,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: {
       row.score = weight ? (row as any)._weighted / weight : null
       row.grade = gradeFor(row.score)
     }
-    const scoredValues = rows.map(r => r.score).filter((v): v is number => v != null)
+    const scoredValues = rows.filter(r => !isExcludedFromPeerPool(r.novel)).map(r => r.score).filter((v): v is number => v != null)
     for (const row of rows) row.percentile = row.score == null ? null : percentileRank(scoredValues, row.score)
     return rows.sort((a,b) => (b.score ?? -1) - (a.score ?? -1))
   }, [novels, latestByNovel])
@@ -137,7 +137,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: {
   })
   const chartData = filtered.flatMap(r => r.score == null ? [] : [{ name: r.novel.title, score: Number(r.score.toFixed(2)) }])
   const scatterData = filtered.flatMap(r => r.values.average_views == null || r.values.followers == null ? [] : [{ x: r.values.average_views, y: r.values.followers, name: r.novel.title }])
-  const selectedCount = scored.length
+  const selectedCount = scored.filter(r => !r.novel.fiction_url.includes('/fiction/183032') && !r.novel.title.toLowerCase().includes('dungeons in denver')).length
   const withScores = scored.filter(r => r.score != null).length
 
   return <div className="benchmark-explorer">
@@ -174,7 +174,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: {
       }}>{createBusy?'Saving…':'Save and compare'}</button></div>
     </div>}
     <div className="stat-grid">
-      <div className="stat-card"><div className="stat-top"><span>Benchmark novels</span></div><strong>{fmt(selectedCount)}</strong><small>Catalogue records, excluding your own fiction</small></div>
+      <div className="stat-card"><div className="stat-top"><span>Benchmark novels</span></div><strong>{fmt(selectedCount)}</strong><small>Eligible comparison records; your own fiction is scored separately</small></div>
       <div className="stat-card"><div className="stat-top"><span>Scored novels</span></div><strong>{fmt(withScores)}</strong><small>Have at least one score component</small></div>
       <div className="stat-card"><div className="stat-top"><span>Mean performance score</span></div><strong>{withScores ? fmt(scored.reduce((sum,r)=>sum+(r.score ?? 0),0)/withScores) : '—'}</strong><small>0–100 relative composite</small></div>
       <div className="stat-card"><div className="stat-top"><span>Latest data</span></div><strong>{fmt(scored.filter(r=>r.snapshot).length)}</strong><small>Novels with metric snapshots</small></div>
@@ -195,7 +195,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: {
         <div><span>Metric coverage</span><strong>{metricValues.length} / {filtered.length}</strong></div>
       </div>
       {selected && <div className="benchmark-position benchmark-percentile"><div><b>{selected.novel.title}</b><span>Selected catalogue novel · {selected.snapshot ? 'Latest snapshot: ' + new Date(selected.snapshot.captured_at).toLocaleDateString() : 'No metric snapshot'}</span></div><div className="percentile-score">{selected.score == null ? '—' : selected.score.toFixed(1) + ' / 100'}<small>overall performance score · Grade {selected.grade}</small></div><div className="percentile-detail">{selected.percentile == null ? 'Overall percentile unavailable' : selected.percentile.toFixed(1) + 'th percentile overall'}<br/>{metricPct == null ? 'Selected metric percentile unavailable' : metricPct.toFixed(1) + 'th percentile for ' + (METRICS.find(m=>m.key===metricKey)?.label || 'metric')}</div></div>}
-      <p className="benchmark-note">The composite score and overall percentile are calculated against the full eligible Catalogue set; filters only narrow the visible table and metric comparison. The overall score is a weighted average of each available metric's percentile: followers 25%, average views 20%, follower-to-average-view ratio 20%, rating 15%, ratings count 10%, and favorites 10%. Missing components are excluded and the remaining weights are renormalized. This measures relative platform performance, not literary quality. Grade bands: A ≥90, B ≥80, C ≥70, D ≥60, E below 60.</p>
+      <p className="benchmark-note">The composite score and overall percentile are calculated against the full eligible Catalogue peer set; your own fiction remains visible and is scored against that peer set. Filters only narrow the visible table and metric comparison. The overall score is a weighted average of each available metric's percentile: followers 25%, average views 20%, follower-to-average-view ratio 20%, rating 15%, ratings count 10%, and favorites 10%. Missing components are excluded and the remaining weights are renormalized. This measures relative platform performance, not literary quality. Grade bands: A ≥90, B ≥80, C ≥70, D ≥60, E below 60.</p>
     </div>
     <div className="panel">
       <div className="panel-heading"><div><h2>Overall score distribution</h2><p>Composite score for each novel in the current comparison set.</p></div></div>
