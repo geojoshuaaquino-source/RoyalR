@@ -39,6 +39,20 @@ const urlValue = (v: unknown) => {
 const metricKeys = ['views','followers','favorites','rating','rating_count','review_count','average_views','chapters','pages']
 const fmt = (n: number | null | undefined) => n == null ? '—' : Intl.NumberFormat('en-US', { notation: n >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n)
 const dateFmt = (s: string | null | undefined) => s ? new Date(s).toLocaleDateString() : '—'
+const median = (values: number[]) => {
+  if (!values.length) return null
+  const sorted = [...values].sort((x, y) => x - y)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+const ageBand = (days: number | null) => {
+  if (days === null || days < 0) return 'Unknown'
+  if (days <= 30) return '1–30 days'
+  if (days <= 90) return '31–90 days'
+  if (days <= 180) return '91–180 days'
+  if (days <= 365) return '181–365 days'
+  return '366+ days'
+}
 
 export default function App() {
   const [session, setSession] = useState<any>(null)
@@ -105,6 +119,41 @@ export default function App() {
   ), [novels])
 
   const latestMetrics = useMemo(() => benchmarkNovels.map(n => latestByNovel.get(n.id)).filter(Boolean) as Snapshot[], [benchmarkNovels, latestByNovel])
+  const ageAdjustedRows = useMemo(() => {
+    const rows = benchmarkNovels.flatMap(n => {
+      const snapshot = latestByNovel.get(n.id)
+      if (!snapshot) return []
+      const publishedTime = n.published_at ? new Date(n.published_at).getTime() : NaN
+      const ageDays = Number.isFinite(publishedTime) ? Math.floor((Date.now() - publishedTime) / 86400000) : null
+      return [{
+        novel: n,
+        snapshot,
+        ageDays,
+        cohort: ageBand(ageDays),
+        conversion: snapshot.average_views && snapshot.average_views > 0 && snapshot.followers !== null
+          ? snapshot.followers / snapshot.average_views
+          : null,
+      }]
+    })
+    return rows.map(row => {
+      const peers = rows.filter(peer => peer.cohort === row.cohort)
+      const atOrBelow = peers.filter(peer => (peer.snapshot.followers || 0) <= (row.snapshot.followers || 0)).length
+      return { ...row, percentile: peers.length ? Math.round((atOrBelow / peers.length) * 100) : null }
+    })
+  }, [benchmarkNovels, latestByNovel])
+  const cohortStats = useMemo(() => {
+    const bands = ['1–30 days', '31–90 days', '91–180 days', '181–365 days', '366+ days', 'Unknown']
+    return bands.map(cohort => {
+      const rows = ageAdjustedRows.filter(row => row.cohort === cohort)
+      return {
+        cohort,
+        count: rows.length,
+        followers: median(rows.map(row => row.snapshot.followers).filter((v): v is number => v !== null)),
+        averageViews: median(rows.map(row => row.snapshot.average_views).filter((v): v is number => v !== null)),
+        conversion: median(rows.map(row => row.conversion).filter((v): v is number => v !== null)),
+      }
+    }).filter(row => row.count > 0)
+  }, [ageAdjustedRows])
   const totals = useMemo(() => ({
     views: latestMetrics.reduce((a, s) => a + (s.views || 0), 0),
     followers: latestMetrics.reduce((a, s) => a + (s.followers || 0), 0),
@@ -326,7 +375,25 @@ export default function App() {
           <div className="page-heading"><div><p className="eyebrow">BENCHMARKS</p><h1>Statistics</h1><p className="muted">Descriptive metrics from the latest imported snapshots.</p></div></div>
           <div className="stat-grid"><Stat icon={BookOpen} label="Benchmark novels" value={fmt(benchmarkNovels.length)} detail="Dungeons in Denver excluded"/><Stat icon={Eye} label="Combined views" value={fmt(totals.views)} detail="Latest snapshots only"/><Stat icon={Users} label="Combined followers" value={fmt(totals.followers)} detail="Latest snapshots only"/><Stat icon={Heart} label="Combined favorites" value={fmt(totals.favorites)} detail="Latest snapshots only"/></div>
           <div className="panel"><div className="panel-heading"><div><h2>Snapshot coverage</h2><p>How much of your catalogue has metric data.</p></div></div><div className="coverage"><div><b>{latestMetrics.length}</b><span>Novels with metrics</span></div><div><b>{benchmarkNovels.length - latestMetrics.length}</b><span>Without metrics</span></div><div><b>{snapshots.length}</b><span>Total historical snapshots</span></div></div></div>
-          <div className="panel"><h2>Top novels by followers</h2><NovelTable novels={[...benchmarkNovels].sort((a,b)=>(latestByNovel.get(b.id)?.followers || 0)-(latestByNovel.get(a.id)?.followers || 0)).slice(0,10)} latest={latestByNovel} watchIds={watchIds} onWatch={toggleWatch}/></div>
+          <div className="panel">
+            <div className="panel-heading"><div><h2>Performance by publication age</h2><p>Cohorts use the imported published_at date and each novel's latest snapshot.</p></div></div>
+            <div className="table-wrap"><table><thead><tr><th>Age cohort</th><th>Novels</th><th>Median followers</th><th>Median avg. views</th><th>Median followers / avg. views</th></tr></thead>
+              <tbody>{cohortStats.map(row => <tr key={row.cohort}><td>{row.cohort}</td><td>{fmt(row.count)}</td><td>{fmt(row.followers)}</td><td>{fmt(row.averageViews)}</td><td>{row.conversion === null ? '—' : (row.conversion * 100).toFixed(2) + '%'}</td></tr>)}</tbody>
+            </table></div>
+            {!ageAdjustedRows.length && <p className="muted">Import publication dates and metric snapshots to calculate age cohorts.</p>}
+          </div>
+          <div className="panel">
+            <div className="panel-heading"><div><h2>Age-adjusted follower ranking</h2><p>Percentile compares followers only against novels in the same age cohort.</p></div></div>
+            <div className="table-wrap"><table><thead><tr><th>Novel</th><th>Age</th><th>Followers</th><th>Avg. views</th><th>Follow conversion</th><th>Age percentile</th></tr></thead>
+              <tbody>{[...ageAdjustedRows].sort((x,y)=>(y.percentile || 0)-(x.percentile || 0) || (y.snapshot.followers || 0)-(x.snapshot.followers || 0)).slice(0,15).map(row => <tr key={row.novel.id}>
+                <td><a className="novel-title" href={row.novel.fiction_url} target="_blank" rel="noreferrer">{row.novel.title}</a><small>{row.novel.author_name || 'Unknown author'}</small></td>
+                <td>{row.ageDays === null ? 'Unknown' : fmt(row.ageDays) + 'd'}</td>
+                <td>{fmt(row.snapshot.followers)}</td><td>{fmt(row.snapshot.average_views)}</td>
+                <td>{row.conversion === null ? '—' : (row.conversion * 100).toFixed(2) + '%'}</td>
+                <td>{row.percentile === null ? '—' : row.percentile + 'th'}</td>
+              </tr>)}</tbody>
+            </table></div>
+          </div>
         </>}
         {loading && <div className="loading-line"><RefreshCw size={14}/> Syncing data…</div>}
         <footer>Royal Road Analytics <span>·</span> Private analytics workspace <span>·</span> Data source: user-provided imports</footer>
