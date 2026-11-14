@@ -39,14 +39,14 @@ const getMetric = (row: Row, key: string): number | null => {
   return row[key as keyof Row] as number | null
 }
 const getUserMetric = (novel: UserNovel, snapshot: UserSnapshot | undefined, key: string): number | null => {
+  if (key === 'p') return snapshot?.pages ?? novel.page_count
+  if (key === 'ch') return snapshot?.chapters ?? novel.chapter_count
   if (!snapshot) return null
   if (key === 'v') return snapshot.views
   if (key === 'av') return snapshot.average_views
   if (key === 'f') return snapshot.followers
   if (key === 'fav') return snapshot.favorites
   if (key === 'rc') return snapshot.rating_count
-  if (key === 'p') return snapshot.pages ?? novel.page_count
-  if (key === 'ch') return snapshot.chapters ?? novel.chapter_count
   if (key === 'followRate') return snapshot.average_views && snapshot.average_views > 0 && snapshot.followers != null ? snapshot.followers / snapshot.average_views * 100 : null
   return null
 }
@@ -119,7 +119,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
   const allMetricValues = baseline.map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
   const stats = summary(values)
   const rawPct = ownValue == null ? null : percentile(allMetricValues, ownValue)
-  const agePeers = selectedAge == null ? [] : baseline.filter(r => Math.abs(r.age - selectedAge) <= 30).map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
+  const agePeers = selectedAge == null ? [] : baseline.filter(r => Math.floor((r.age - 1) / 30) === Math.floor((selectedAge - 1) / 30)).map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
   const agePct = ownValue == null ? null : percentile(agePeers, ownValue)
 
   const histogram = useMemo(() => {
@@ -184,7 +184,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
       </div>
       <div className="benchmark-chart-head"><div><h2>{metric.label} distribution</h2><p className="muted">Histogram of the selected cohort. Count is the number of novels in each range.</p></div></div>
       <div className="benchmark-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={histogram} margin={{top:12,right:12,left:0,bottom:24}}><CartesianGrid strokeDasharray="3 3" stroke="#293342"/><XAxis dataKey="range" interval={3} angle={-20} textAnchor="end" height={55} tick={{fill:'#93a0b2',fontSize:10}}/><YAxis allowDecimals={false} tick={{fill:'#93a0b2',fontSize:10}}/><Tooltip contentStyle={{background:'#151e2a',border:'1px solid #344154',borderRadius:8,color:'#eef2f7'}} formatter={(v:any)=>[v,'Novels']}/><Bar dataKey="count" fill="#78bfa0" radius={[4,4,0,0]}/>{markerIndex != null && <ReferenceLine x={histogram[markerIndex]?.range} stroke="#f0b66b" strokeWidth={2} label={{value:'Your novel',fill:'#f0b66b',position:'top'}}/>}</BarChart></ResponsiveContainer></div>
-      {selectedNovel && <div className="benchmark-position"><b>{selectedNovel.title}</b><span>{ownValue == null ? 'This metric is not available for your latest snapshot.' : <>Value: <strong>{fmt(ownValue)}</strong> · Overall percentile: <strong>{rawPct?.toFixed(1)}th</strong>{agePct == null ? '' : <> · Within ±30 days of its age: <strong>{agePct.toFixed(1)}th</strong></>}</>}</span></div>}
+      {selectedNovel && <div className="benchmark-position"><b>{selectedNovel.title}</b><span>{ownValue == null ? 'This metric is not available for your latest snapshot.' : <>Value: <strong>{fmt(ownValue)}</strong> · Overall percentile: <strong>{rawPct?.toFixed(1)}th</strong>{agePct == null ? '' : <> · Within its 30-day age band: <strong>{agePct.toFixed(1)}th</strong></>}</>}</span></div>}
       <p className="benchmark-note">Counts and percentiles use available values only. The distribution is highly skewed for several metrics, so the graph uses log-spaced bins for count metrics; it does not assume a normal distribution.</p>
     </div>
     <div className="panel">
