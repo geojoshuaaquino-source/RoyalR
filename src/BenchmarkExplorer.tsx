@@ -148,7 +148,8 @@ export default function BenchmarkExplorer({ novels, latestByNovel, onCreateNovel
     return ranks
   }, [scored])
   const pageSize = 50
-  const visibleSorted = sorted.slice(0, pageSize)
+  const visibleSorted = [...sorted.slice(0, pageSize)]
+  if (ownNovel && !visibleSorted.some(row => row.novel.id === ownNovel.novel.id)) visibleSorted.push(ownNovel)
   const chartData = sorted.filter(r => r.score != null).slice(0,40).map(r => ({ name: r.novel.title, score: Number((r.score as number).toFixed(2)) }))
   const scatterData = filtered.flatMap(r => r.values.average_views == null || r.values.followers == null ? [] : [{ x: r.values.average_views, y: r.values.followers, name: r.novel.title }]).slice(0,250)
   const selectedCount = scored.filter(r => !r.isOwnNovel).length
@@ -224,7 +225,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel, onCreateNovel
     <div className="panel">
       <div className="panel-heading"><div><h2>Novel rankings</h2><p>Every novel receives one composite score and an overall percentile.</p></div><label>Sort by<select value={sortBy} onChange={e=>setSortBy(e.target.value as typeof sortBy)}><option value="score">Performance score</option><option value="percentile">Percentile</option><option value="followers">Followers</option><option value="views">Average views</option></select></label></div>
       <div className="table-wrap"><table><thead><tr><th>Overall rank</th><th>Novel</th><th>Score / 100</th><th>Grade</th><th>Overall percentile</th><th>Followers</th><th>Avg. views</th><th>Follower ratio</th><th>Coverage</th></tr></thead><tbody>{visibleSorted.map(row=><tr key={row.novel.id} className={`${row.isOwnNovel ? 'your-novel-row' : ''} ${selected?.novel.id===row.novel.id ? 'selected-novel-row' : ''}`} onClick={()=>setSelectedId(row.novel.id)} style={{cursor:'pointer'}}><td>{row.isOwnNovel ? '—' : (peerRankById.get(row.novel.id) ?? '—')}</td><td><a className="novel-title" href={row.novel.fiction_url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()}>{row.novel.title}</a>{row.isOwnNovel && <span className="your-novel-pill table-own-pill">YOUR NOVEL</span>}<small>{row.novel.author_name || 'Unknown author'}</small></td><td>{row.score == null ? '—' : row.score.toFixed(1)}</td><td>{row.grade}</td><td>{row.percentile == null ? '—' : row.percentile.toFixed(1) + 'th percentile'}</td><td>{fmt(row.values.followers)}</td><td>{fmt(row.values.average_views)}</td><td>{row.values.follow_rate == null ? '—' : row.values.follow_rate.toFixed(2)+'%'}</td><td>{row.coverage} / {SCORE_WEIGHTS.length}</td></tr>)}</tbody></table></div>
-      {sorted.length > pageSize && <div className="benchmark-pagination">Showing {visibleSorted.length} of {sorted.length} novels · capped at 50 rows to keep the page responsive</div>}
+      {sorted.length > pageSize && <div className="benchmark-pagination">Showing the top 50 of {sorted.length} novels, plus your novel</div>}
       {!sorted.length && <p className="muted">No Catalogue novels match these filters. Import novels or adjust the filters.</p>}
     </div>
   </div>
