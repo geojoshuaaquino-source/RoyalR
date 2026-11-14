@@ -13,11 +13,6 @@ type UserSnapshot = {
   captured_at: string
 }
 type MetricKey = 'views' | 'average_views' | 'followers' | 'favorites' | 'follow_rate' | 'rating' | 'rating_count' | 'pages' | 'words' | 'chapters'
-type ScoredNovel = {
-  novel: UserNovel; snapshot?: UserSnapshot; age: number | null
-  values: Record<MetricKey, number | null>; score: number | null; percentile: number | null
-  coverage: number; grade: string
-}
 const SCORE_WEIGHTS: { key: MetricKey; label: string; weight: number }[] = [
   { key: 'followers', label: 'Followers', weight: 25 },
   { key: 'average_views', label: 'Average views', weight: 20 },
