@@ -172,12 +172,12 @@ export default function App() {
     const aliases: Record<string,string> = {
       source_url:'url', fiction_url:'url', royalroad_url:'url', total_views:'views',
       ratings_count:'rating_count', chapter_count:'chapters', page_count:'pages',
-      wordcount:'word_count', overallscore:'overall_score', stylescore:'style_score',
-      storyscore:'story_score', grammarscore:'grammar_score', characterscore:'character_score',
       authorname:'author', publishedat:'published_at'
     }
     return rows.map(source => {
-      const row: ImportRow = {...source}
+      const row: ImportRow = Object.fromEntries(Object.entries(source).map(([key,value]) => [
+        key.trim().replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().replace(/[ -]+/g, '_'), value
+      ]))
       for (const [from,to] of Object.entries(aliases)) if (row[to] == null && row[from] != null) row[to] = row[from]
       return row
     })
