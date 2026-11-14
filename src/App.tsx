@@ -171,8 +171,11 @@ export default function App() {
   function normalizeImportRows(rows: ImportRow[]) {
     const aliases: Record<string,string> = {
       source_url:'url', fiction_url:'url', royalroad_url:'url', total_views:'views',
-      ratings_count:'rating_count', chapter_count:'chapters', page_count:'pages',
-      authorname:'author', publishedat:'published_at'
+      ratings_count:'rating_count', page_count:'pages', words:'word_count',
+      overall_rating:'rating', overall_score:'rating', style_rating:'style_score',
+      story_rating:'story_score', grammar_rating:'grammar_score', character_rating:'character_score',
+      first_published_at:'published_at', authorname:'author', publishedat:'published_at',
+      latest_updates_tags:'tags', latest_updates_status:'status', latest_updates_type:'fiction_type'
     }
     return rows.map(source => {
       const row: ImportRow = Object.fromEntries(Object.entries(source).map(([key,value]) => [
@@ -238,8 +241,10 @@ export default function App() {
       if (seenUrls.has(url)) { skipped++; errors.push({ user_id: uid, run_id: runId, row_number: i + 2, fiction_url: url, error_code: 'DUPLICATE_URL', error_message: 'Duplicate URL within this CSV batch; first occurrence was kept.', raw_row: row }); return }
       seenUrls.add(url)
       const title = textValue(row.title) || url.split('/').filter(Boolean).pop()?.replace(/-/g, ' ') || 'Untitled novel'
-      const tags = textValue(row.tags)?.split(/[;,]/).map(x => x.trim()).filter(Boolean) || []
-      records.push({ user_id: uid, fiction_url: url, title, author_name: textValue(row.author ?? row.author_name), published_at: textValue(row.published_at), genre: textValue(row.genre), tags, publication_status: textValue(row.status ?? row.publication_status), chapter_count: numberValue(row.chapters ?? row.chapter_count), page_count: numberValue(row.pages ?? row.page_count), last_seen_at: new Date().toISOString() })
+      const rawTags = row.tags ?? row.latest_updates_tags
+      const tags = Array.isArray(rawTags) ? rawTags.map(x => String(x).trim()).filter(Boolean) : textValue(rawTags)?.split(/[;,]/).map(x => x.trim()).filter(Boolean) || []
+      const chapterTotal = Array.isArray(row.chapters) ? row.chapters.length : row.chapters
+      records.push({ user_id: uid, fiction_url: url, title, author_name: textValue(row.author ?? row.author_name), published_at: textValue(row.published_at ?? row.first_published_at), genre: textValue(row.genre ?? row.genres), tags, publication_status: textValue(row.status ?? row.publication_status ?? row.latest_updates_status), chapter_count: numberValue(row.chapter_count ?? chapterTotal), page_count: numberValue(row.pages ?? row.page_count), last_seen_at: new Date().toISOString() })
       sourceRows.push({ row, url })
     })
     try {
@@ -262,16 +267,16 @@ export default function App() {
         if (!novelId) return
         const metrics: Record<string, number | null> = {
           views: numberValue(row.views ?? row.total_views), followers: numberValue(row.followers), favorites: numberValue(row.favorites),
-          rating: numberValue(row.rating ?? row.overall_score ?? row.overallscore), rating_count: numberValue(row.rating_count ?? row.ratings_count), review_count: numberValue(row.review_count),
+          rating: numberValue(row.rating ?? row.overall_rating ?? row.overall_score ?? row.overallscore), rating_count: numberValue(row.rating_count ?? row.ratings_count), review_count: numberValue(row.review_count),
           average_views: numberValue(row.average_views), chapters: numberValue(row.chapters ?? row.chapter_count), pages: numberValue(row.pages ?? row.page_count),
         }
         const extendedMetrics = {
-          word_count: numberValue(row.word_count ?? row.wordcount),
-          overall_score: numberValue(row.overall_score ?? row.overallscore),
-          style_score: numberValue(row.style_score ?? row.stylescore),
-          story_score: numberValue(row.story_score ?? row.storyscore),
-          grammar_score: numberValue(row.grammar_score ?? row.grammarscore),
-          character_score: numberValue(row.character_score ?? row.characterscore),
+          word_count: numberValue(row.word_count ?? row.words ?? row.wordcount),
+          overall_score: numberValue(row.overall_score ?? row.overall_rating ?? row.overallscore),
+          style_score: numberValue(row.style_score ?? row.style_rating ?? row.stylescore),
+          story_score: numberValue(row.story_score ?? row.story_rating ?? row.storyscore),
+          grammar_score: numberValue(row.grammar_score ?? row.grammar_rating ?? row.grammarscore),
+          character_score: numberValue(row.character_score ?? row.character_rating ?? row.characterscore),
         }
         if (metricKeys.some(k => metrics[k] !== null) || Object.values(extendedMetrics).some(v => v !== null)) {
           snapshotRows.push({ user_id: uid, novel_id: novelId, source_type: 'file_import', ...metrics, raw_data: { ...row, ...extendedMetrics } })
@@ -534,8 +539,8 @@ export default function App() {
             <label className="check-row"><input type="checkbox" checked={watchImported} onChange={e => setWatchImported(e.target.checked)}/> Add imported novels to weekly watchlist</label>
             {importError && <p className="error">{importError}</p>}
             <button className="primary full" disabled={!preview.length || importBusy || !!importError} onClick={() => void runImport()}>{importBusy ? 'Importing…' : `Import ${preview.length || 0} novels`}</button>
-          </div><div className="panel"><h2>Supported columns</h2><div className="field-list">{['url / fiction_url / source_url (required)','title','author / author_name','published_at','genre','tags','status','chapters / chapter_count','pages / page_count','views / total_views','followers','favorites','rating','rating_count / ratings_count','review_count','average_views','word_count','overall_score','style_score','story_score','grammar_score','character_score'].map(x => <code key={x}>{x}</code>)}</div><div className="info-strip compact"><ShieldCheck size={16}/><span>File imports are stored under your account. Snapshots are preserved as history, not overwritten.</span></div></div></div>
-          {preview.length > 0 && <div className="panel preview-panel"><div className="panel-heading"><div><h2>Import preview</h2><p>Showing the first five rows.</p></div><span className="pill">{preview.length} rows</span></div><div className="table-wrap"><table><thead><tr><th>Title</th><th>Author</th><th>Views</th><th>Followers</th><th>Rating</th></tr></thead><tbody>{preview.slice(0,5).map((r,i)=><tr key={i}><td>{String(r.title || r.url || r.fiction_url || '—')}</td><td>{String(r.author || '—')}</td><td>{fmt(numberValue(r.views))}</td><td>{fmt(numberValue(r.followers))}</td><td>{fmt(numberValue(r.rating))}</td></tr>)}</tbody></table></div></div>}
+          </div><div className="panel"><h2>Supported columns</h2><div className="field-list">{['url / fiction_url / source_url','title','author','first_published_at / published_at','tags (array or text)','status / latest_updates_status','chapters (array) / chapter_count','pages','total_views','average_views','followers','favorites','ratings_count','words','overall_rating','style_rating','story_rating','grammar_rating','character_rating'].map(x => <code key={x}>{x}</code>)}</div><div className="info-strip compact"><ShieldCheck size={16}/><span>File imports are stored under your account. Snapshots are preserved as history, not overwritten.</span></div></div></div>
+          {preview.length > 0 && <div className="panel preview-panel"><div className="panel-heading"><div><h2>Import preview</h2><p>Showing the first five rows.</p></div><span className="pill">{preview.length} rows</span></div><div className="table-wrap"><table><thead><tr><th>Title</th><th>Author</th><th>Views</th><th>Followers</th><th>Rating</th></tr></thead><tbody>{preview.slice(0,5).map((r,i)=><tr key={i}><td>{String(r.title || r.url || r.fiction_url || '—')}</td><td>{String(r.author || '—')}</td><td>{fmt(numberValue(r.views ?? r.total_views))}</td><td>{fmt(numberValue(r.followers))}</td><td>{fmt(numberValue(r.rating ?? r.overall_rating))}</td></tr>)}</tbody></table></div></div>}
         </>}
         {tab === 'scrape' && <>
           <div className="page-heading scrape-heading">
