@@ -41,7 +41,7 @@ function jsonLd(html) {
 
 function extractMetric(text, labels) {
   for (const label of labels) {
-    const re = new RegExp("\\\\b" + label + "\\\\b\\\\s*[:\\\\-]?\\\\s*([0-9][0-9,]*(?:\\\\.[0-9]+)?)", "i");
+    const re = new RegExp("\\b" + label + "\\b\\s*[:\\-]?\\s*([0-9][0-9,]*(?:\\.[0-9]+)?)", "i");
     const match = text.match(re);
     if (match) {
       const value = Number(match[1].replace(/,/g, ""));
