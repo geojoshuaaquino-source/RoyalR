@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import Papa from 'papaparse'
 import {
   Activity, BookOpen, ChartNoAxesCombined, ChevronRight, CircleHelp, CloudUpload,
@@ -6,7 +6,7 @@ import {
   Users, X, Globe
 } from 'lucide-react'
 import { supabase, supabaseConfigured } from './lib/supabase'
-import BenchmarkExplorer from './BenchmarkExplorer'
+const BenchmarkExplorer = lazy(() => import('./BenchmarkExplorer'))
 
 type Novel = {
   id: string; fiction_url: string; title: string; author_name: string | null;
@@ -501,7 +501,7 @@ export default function App() {
             </aside>
           </div>
         </>}
-        {tab === 'statistics' && <BenchmarkExplorer novels={novels} latestByNovel={latestByNovel} />}
+        {tab === 'statistics' && <Suspense fallback={<div className="panel"><p className="muted">Loading benchmark explorer…</p></div>}><BenchmarkExplorer novels={novels} latestByNovel={latestByNovel} /></Suspense>}
         {loading && <div className="loading-line"><RefreshCw size={14}/> Syncing data…</div>}
         <footer>Royal Road Analytics <span>·</span> Private analytics workspace <span>·</span> Data source: user-provided imports</footer>
       </div>
