@@ -1,285 +1,178 @@
-import { useEffect, useMemo, useState } from 'react'
-import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
+import { useMemo, useState } from 'react'
+import { CartesianGrid, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, BarChart, Bar } from 'recharts'
 
-type UserNovel = { id: string; title: string; fiction_url: string; published_at: string | null; page_count: number | null; chapter_count: number | null }
-type UserSnapshot = { views: number | null; average_views: number | null; followers: number | null; favorites: number | null; rating: number | null; rating_count: number | null; chapters: number | null; pages: number | null; raw_data: Record<string, unknown> | null; captured_at: string }
-type Row = { age: number; v: number | null; av: number | null; f: number | null; fav: number | null; rc: number | null; p: number | null; w: number | null; ch: number | null; r: number | null; st: number | null; sr: number | null; g: number | null; c: number | null; genres: string[]; tags: string[]; status: string; fictionType: string }
-type Metric = { key: string; label: string; short: string; log?: boolean }
-const METRICS: Metric[] = [
-  { key: 'v', label: 'Total views', short: 'Views', log: true },
-  { key: 'av', label: 'Average views', short: 'Avg. views', log: true },
-  { key: 'f', label: 'Followers', short: 'Followers', log: true },
-  { key: 'fav', label: 'Favorites', short: 'Favorites', log: true },
-  { key: 'followRate', label: 'Follower-to-average-view ratio (%)', short: 'Follower ratio', log: true },
-  { key: 'rc', label: 'Ratings count', short: 'Ratings', log: true },
-  { key: 'p', label: 'Pages', short: 'Pages', log: true },
-  { key: 'w', label: 'Word count', short: 'Words', log: true },
-  { key: 'ch', label: 'Chapter count', short: 'Chapters', log: true },
-  { key: 'wordsPerPage', label: 'Words per page', short: 'Words/page' },
-  { key: 'r', label: 'Overall score', short: 'Overall score' },
-  { key: 'st', label: 'Style score', short: 'Style' },
-  { key: 'sr', label: 'Story score', short: 'Story' },
-  { key: 'g', label: 'Grammar score', short: 'Grammar' },
-  { key: 'c', label: 'Character score', short: 'Character' },
-]
-const AGE_FILTERS = [
-  { value: 'all', label: 'All ages', test: (_: number) => true },
-  { value: '1-30', label: '1–30 days', test: (a: number) => a >= 1 && a <= 30 },
-  { value: '31-60', label: '31–60 days', test: (a: number) => a >= 31 && a <= 60 },
-  { value: '61-90', label: '61–90 days', test: (a: number) => a >= 61 && a <= 90 },
-  { value: '91-180', label: '91–180 days', test: (a: number) => a >= 91 && a <= 180 },
-  { value: '181-365', label: '181–365 days', test: (a: number) => a >= 181 && a <= 365 },
-  { value: '366+', label: '366+ days', test: (a: number) => a >= 366 },
-]
-const COLUMNS = ['age','v','av','f','fav','rc','p','w','ch','r','st','sr','g','c'] as const
-const fmt = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? '—' : Intl.NumberFormat('en-US', { notation: Math.abs(value) >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 2 }).format(value)
-const getMetric = (row: Row, key: string): number | null => {
-  if (key === 'followRate') return row.av && row.av > 0 && row.f != null ? row.f / row.av * 100 : null
-  if (key === 'wordsPerPage') return row.p && row.p > 0 && row.w != null ? row.w / row.p : null
-  return row[key as keyof Row] as number | null
+type UserNovel = {
+  id: string; title: string; fiction_url: string; author_name: string | null
+  genre: string | null; publication_status: string | null; published_at: string | null
+  page_count: number | null; chapter_count: number | null; tags: string[]
 }
-const getUserMetric = (novel: UserNovel, snapshot: UserSnapshot | undefined, key: string): number | null => {
-  if (key === 'p') return snapshot?.pages ?? novel.page_count
-  if (key === 'ch') return snapshot?.chapters ?? novel.chapter_count
-  if (!snapshot) return null
-  if (key === 'v') return snapshot.views
-  if (key === 'av') return snapshot.average_views
-  if (key === 'f') return snapshot.followers
-  if (key === 'fav') return snapshot.favorites
-  if (key === 'rc') return snapshot.rating_count
-  const raw = snapshot.raw_data || {}
-  const rawMetric = (...keys: string[]) => {
-    for (const name of keys) {
-      const value = raw[name]
-      if (value !== undefined && value !== null && value !== '') {
-        const number = Number(value)
-        if (Number.isFinite(number)) return number
-      }
+type UserSnapshot = {
+  views: number | null; average_views: number | null; followers: number | null
+  favorites: number | null; rating: number | null; rating_count: number | null
+  chapters: number | null; pages: number | null; raw_data: Record<string, unknown> | null
+  captured_at: string
+}
+type MetricKey = 'views' | 'average_views' | 'followers' | 'favorites' | 'follow_rate' | 'rating' | 'rating_count' | 'pages' | 'words' | 'chapters'
+type ScoredNovel = {
+  novel: UserNovel; snapshot?: UserSnapshot; age: number | null
+  values: Record<MetricKey, number | null>; score: number | null; percentile: number | null
+  coverage: number; grade: string
+}
+const SCORE_WEIGHTS: { key: MetricKey; label: string; weight: number }[] = [
+  { key: 'followers', label: 'Followers', weight: 25 },
+  { key: 'average_views', label: 'Average views', weight: 20 },
+  { key: 'follow_rate', label: 'Followers / average views', weight: 20 },
+  { key: 'rating', label: 'Overall rating', weight: 15 },
+  { key: 'rating_count', label: 'Ratings count', weight: 10 },
+  { key: 'favorites', label: 'Favorites', weight: 10 },
+]
+const METRICS: { key: MetricKey; label: string }[] = [
+  { key: 'views', label: 'Total views' }, { key: 'average_views', label: 'Average views' },
+  { key: 'followers', label: 'Followers' }, { key: 'favorites', label: 'Favorites' },
+  { key: 'follow_rate', label: 'Followers / average views (%)' },
+  { key: 'rating', label: 'Overall rating' }, { key: 'rating_count', label: 'Ratings count' },
+  { key: 'pages', label: 'Pages' }, { key: 'words', label: 'Word count' }, { key: 'chapters', label: 'Chapters' },
+]
+const numberFrom = (raw: Record<string, unknown> | null, ...keys: string[]): number | null => {
+  if (!raw) return null
+  for (const key of keys) {
+    const value = raw[key]
+    if (value !== null && value !== undefined && value !== '') {
+      const n = Number(value)
+      if (Number.isFinite(n)) return n
     }
-    return null
   }
-  if (key === 'r') return snapshot.rating ?? rawMetric('overall_score', 'overallScore')
-  if (key === 'w') return rawMetric('word_count', 'wordCount', 'words')
-  if (key === 'st') return rawMetric('style_score', 'styleScore')
-  if (key === 'sr') return rawMetric('story_score', 'storyScore')
-  if (key === 'g') return rawMetric('grammar_score', 'grammarScore')
-  if (key === 'c') return rawMetric('character_score', 'characterScore')
-  if (key === 'wordsPerPage') {
-    const words = rawMetric('word_count', 'wordCount', 'words')
-    const pages = snapshot.pages ?? novel.page_count
-    return words != null && pages && pages > 0 ? words / pages : null
-  }
-  if (key === 'followRate') return snapshot.average_views && snapshot.average_views > 0 && snapshot.followers != null ? snapshot.followers / snapshot.average_views * 100 : null
   return null
 }
-const percentile = (values: number[], value: number) => values.length ? values.filter(x => x <= value).length / values.length * 100 : null
-const median = (values: number[]) => {
-  if (!values.length) return null
-  const sorted = [...values].sort((a,b) => a-b), m = Math.floor(sorted.length / 2)
-  return sorted.length % 2 ? sorted[m] : (sorted[m-1] + sorted[m]) / 2
+const metricValue = (novel: UserNovel, snapshot: UserSnapshot | undefined, key: MetricKey): number | null => {
+  if (!snapshot) return null
+  const raw = snapshot.raw_data
+  if (key === 'views') return snapshot.views
+  if (key === 'average_views') return snapshot.average_views
+  if (key === 'followers') return snapshot.followers
+  if (key === 'favorites') return snapshot.favorites
+  if (key === 'rating') return snapshot.rating ?? numberFrom(raw, 'overall_score', 'overallScore', 'overall_rating')
+  if (key === 'rating_count') return snapshot.rating_count
+  if (key === 'pages') return snapshot.pages ?? novel.page_count
+  if (key === 'chapters') return snapshot.chapters ?? novel.chapter_count
+  if (key === 'words') return numberFrom(raw, 'word_count', 'wordCount', 'words')
+  if (key === 'follow_rate') return snapshot.average_views && snapshot.average_views > 0 && snapshot.followers != null ? snapshot.followers / snapshot.average_views * 100 : null
+  return null
 }
-const summary = (values: number[]) => {
-  if (!values.length) return { mean: null, median: null, mode: '—', count: 0 }
-  const counts = new Map<number, number>()
-  values.forEach(v => counts.set(v, (counts.get(v) || 0) + 1))
-  const maxCount = Math.max(...counts.values())
-  const modes = [...counts.entries()].filter(([,n]) => n === maxCount).map(([v]) => v).sort((a,b)=>a-b)
-  return { mean: values.reduce((a,b)=>a+b,0)/values.length, median: median(values), mode: modes.slice(0,3).map(fmt).join(', ') + (modes.length > 3 ? '…' : ''), count: values.length }
-}
-const cohort = (age: number) => age <= 90 ? '0–90 days' : age <= 180 ? '91–180 days' : age <= 270 ? '181–270 days' : age <= 360 ? '271–360 days' : '361+ days'
-const ageOf = (publishedAt: string | null) => publishedAt ? Math.max(0, Math.floor((Date.now() - new Date(publishedAt).getTime()) / 86400000)) : null
+const ageOf = (date: string | null) => date && Number.isFinite(new Date(date).getTime()) ? Math.max(0, Math.floor((Date.now() - new Date(date).getTime()) / 86400000)) : null
+const percentileRank = (values: number[], value: number) => values.length ? values.filter(v => v <= value).length / values.length * 100 : null
+const fmt = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? '—' : Intl.NumberFormat('en-US', { notation: Math.abs(value) >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 2 }).format(value)
+const gradeFor = (score: number | null) => score == null ? 'N/A' : score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'E'
 
-type CreateNovelInput = { title: string; url: string; publishedAt: string; genre: string; tags: string; metrics: Record<string, number | null> }
-export default function BenchmarkExplorer({ novels, latestByNovel, onCreateNovel }: { novels: UserNovel[]; latestByNovel: Map<string, UserSnapshot>; onCreateNovel: (input: CreateNovelInput) => Promise<string> }) {
-  const [baseline, setBaseline] = useState<Row[]>([])
+export default function BenchmarkExplorer({ novels, latestByNovel }: {
+  novels: UserNovel[]; latestByNovel: Map<string, UserSnapshot>
+}) {
   const [genreFilter, setGenreFilter] = useState('All genres')
-  const [typeFilter, setTypeFilter] = useState('All types')
   const [statusFilter, setStatusFilter] = useState('All statuses')
   const [tagFilter, setTagFilter] = useState('All tags')
-  const [loadError, setLoadError] = useState('')
-  const [metricKey, setMetricKey] = useState('f')
   const [ageFilter, setAgeFilter] = useState('all')
-  const [selectedNovelId, setSelectedNovelId] = useState('')
-  const [xMetric, setXMetric] = useState('av')
-  const [yMetric, setYMetric] = useState('f')
-  const [createOpen, setCreateOpen] = useState(false)
-  const [createBusy, setCreateBusy] = useState(false)
-  const [createError, setCreateError] = useState('')
-  const [draftTitle, setDraftTitle] = useState('')
-  const [draftUrl, setDraftUrl] = useState('')
-  const [draftPublishedAt, setDraftPublishedAt] = useState('')
-  const [draftGenre, setDraftGenre] = useState('')
-  const [draftTags, setDraftTags] = useState('')
-  const [draftMetrics, setDraftMetrics] = useState<Record<string, string>>({})
+  const [metricKey, setMetricKey] = useState<MetricKey>('followers')
+  const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState<'score' | 'percentile' | 'followers' | 'views'>('score')
+  const [selectedId, setSelectedId] = useState('')
 
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      try {
-        const response = await fetch('/benchmark-baseline.csv.gz.b64')
-        if (!response.ok) throw new Error('Could not load the frozen benchmark data.')
-        const encoded = (await response.text()).trim()
-        const bytes = Uint8Array.from(atob(encoded), c => c.charCodeAt(0))
-        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
-        const csv = await new Response(stream).text()
-        const categoryResponse = await fetch('/benchmark-categories.json.gz.b64')
-        if (!categoryResponse.ok) throw new Error('Could not load benchmark categories.')
-        const categoryBytes = Uint8Array.from(atob((await categoryResponse.text()).trim()), c => c.charCodeAt(0))
-        const categoryStream = new Blob([categoryBytes]).stream().pipeThrough(new DecompressionStream('gzip'))
-        const categories = JSON.parse(await new Response(categoryStream).text()) as Array<{ genres: string[]; tags: string[]; status: string; fictionType: string }>
-        const rows = csv.trim().split(/\r?\n/).map((line, index) => {
-          const values = line.split(',')
-          const row: Record<string, number | null> = {}
-          COLUMNS.forEach((key, i) => row[key] = values[i] === '' || values[i] === undefined ? null : Number(values[i]))
-          return { ...row, ...(categories[index] || { genres: [], tags: [], status: 'Unknown', fictionType: 'Unknown' }) } as Row
-        })
-        if (!cancelled) setBaseline(rows)
-      } catch (error) {
-        if (!cancelled) setLoadError(error instanceof Error ? error.message : 'Benchmark data failed to load.')
+  const scored = useMemo(() => {
+    const eligible = novels.filter(n => !n.fiction_url.includes('/fiction/183032') && !n.title.toLowerCase().includes('dungeons in denver'))
+    const rows = eligible.map(novel => {
+      const snapshot = latestByNovel.get(novel.id)
+      const values = Object.fromEntries(METRICS.map(m => [m.key, metricValue(novel, snapshot, m.key)])) as Record<MetricKey, number | null>
+      return { novel, snapshot, age: ageOf(novel.published_at), values, score: null as number | null, percentile: null as number | null, coverage: 0, grade: 'N/A' }
+    })
+    for (const component of SCORE_WEIGHTS) {
+      const available = rows.map(r => r.values[component.key]).filter((v): v is number => v != null && Number.isFinite(v))
+      for (const row of rows) {
+        const value = row.values[component.key]
+        if (value == null || !available.length) continue
+        const pct = percentileRank(available, value)
+        if (pct != null) {
+          const current = (row as any)._weighted || 0
+          ;(row as any)._weighted = current + pct * component.weight
+          ;(row as any)._weight = ((row as any)._weight || 0) + component.weight
+          row.coverage++
+        }
       }
     }
-    void load()
-    return () => { cancelled = true }
-  }, [])
-
-  useEffect(() => {
-    if (!selectedNovelId && novels.length) {
-      const own = novels.find(n => n.fiction_url.includes('/fiction/183032')) || novels[0]
-      setSelectedNovelId(own.id)
+    for (const row of rows) {
+      const weight = (row as any)._weight || 0
+      row.score = weight ? (row as any)._weighted / weight : null
+      row.grade = gradeFor(row.score)
     }
-  }, [novels, selectedNovelId])
+    const scoredValues = rows.map(r => r.score).filter((v): v is number => v != null)
+    for (const row of rows) row.percentile = row.score == null ? null : percentileRank(scoredValues, row.score)
+    return rows.sort((a,b) => (b.score ?? -1) - (a.score ?? -1))
+  }, [novels, latestByNovel])
 
-  const selectedNovel = novels.find(n => n.id === selectedNovelId)
-  const selectedSnapshot = selectedNovel ? latestByNovel.get(selectedNovel.id) : undefined
-  const selectedAge = selectedNovel ? ageOf(selectedNovel.published_at) : null
-  const activeAge = AGE_FILTERS.find(x => x.value === ageFilter) || AGE_FILTERS[0]
-  const genres = [...new Set(baseline.flatMap(r => r.genres || []))].sort()
-  const types = [...new Set(baseline.map(r => r.fictionType).filter(Boolean))].sort()
-  const statuses = [...new Set(baseline.map(r => r.status).filter(Boolean))].sort()
-  const tags = [...new Set(baseline.flatMap(r => r.tags || []))].sort()
-  const categoryFiltered = baseline.filter(r => (genreFilter === 'All genres' || r.genres.includes(genreFilter)) && (typeFilter === 'All types' || r.fictionType === typeFilter) && (statusFilter === 'All statuses' || r.status === statusFilter) && (tagFilter === 'All tags' || r.tags.includes(tagFilter)))
-  const filtered = useMemo(() => categoryFiltered.filter(r => activeAge.test(r.age)), [baseline, activeAge, genreFilter, typeFilter, statusFilter, tagFilter])
-  const metric = METRICS.find(m => m.key === metricKey) || METRICS[2]
-  const values = filtered.map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
-  const ownValue = selectedNovel ? getUserMetric(selectedNovel, selectedSnapshot, metricKey) : null
-  const stats = summary(values)
-  const rawPct = ownValue == null ? null : percentile(values, ownValue)
-  const agePeers = selectedAge == null ? [] : categoryFiltered.filter(r => Math.floor((r.age - 1) / 30) === Math.floor((selectedAge - 1) / 30)).map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
-  const agePct = ownValue == null ? null : percentile(agePeers, ownValue)
-
-  const histogram = useMemo(() => {
-    if (!values.length) return []
-    const transformed = values.map(v => metric.log ? Math.log10(Math.max(0, v) + 1) : v)
-    const min = Math.min(...transformed), max = Math.max(...transformed)
-    const binCount = 18, step = max === min ? 1 : (max - min) / binCount
-    return Array.from({ length: binCount }, (_, i) => {
-      const lo = min + i * step, hi = i === binCount - 1 ? max : lo + step
-      const count = transformed.filter(v => v >= lo && (i === binCount - 1 ? v <= hi : v < hi)).length
-      const inverse = (v: number) => metric.log ? Math.pow(10, v) - 1 : v
-      return { index: i, range: fmt(inverse(lo)) + '–' + fmt(inverse(hi)), count, midpoint: (lo + hi) / 2 }
-    })
-  }, [values, metric.log])
-  const markerIndex = ownValue == null || !values.length ? null : (() => {
-    const transformed = values.map(v => metric.log ? Math.log10(Math.max(0,v)+1) : v)
-    const min = Math.min(...transformed), max = Math.max(...transformed)
-    const point = metric.log ? Math.log10(Math.max(0,ownValue)+1) : ownValue
-    return Math.max(0, Math.min(17, Math.floor((point-min) / (max === min ? 1 : (max-min)/18))))
-  })()
-
-  const xDef = METRICS.find(m => m.key === xMetric) || METRICS[1]
-  const yDef = METRICS.find(m => m.key === yMetric) || METRICS[2]
-  const scatterData = filtered.flatMap(row => {
-    const x = getMetric(row, xMetric), y = getMetric(row, yMetric)
-    return x == null || y == null ? [] : [{ x, y }]
+  const genres = [...new Set(novels.filter(n => !n.fiction_url.includes('/fiction/183032')).flatMap(n => (n.genre || '').split(/[;,]/).map(x => x.trim()).filter(Boolean)))].sort()
+  const tags = [...new Set(novels.filter(n => !n.fiction_url.includes('/fiction/183032')).flatMap(n => n.tags || []))].sort()
+  const statuses = [...new Set(novels.map(n => n.publication_status).filter((x): x is string => !!x))].sort()
+  const filtered = useMemo(() => scored.filter(row => {
+    const n = row.novel
+    const genreMatches = genreFilter === 'All genres' || (n.genre || '').split(/[;,]/).map(x => x.trim()).includes(genreFilter)
+    const tagMatches = tagFilter === 'All tags' || (n.tags || []).includes(tagFilter)
+    const statusMatches = statusFilter === 'All statuses' || n.publication_status === statusFilter
+    const ageMatches = ageFilter === 'all' || (row.age != null && (ageFilter === '1-30' ? row.age <= 30 : ageFilter === '31-90' ? row.age >= 31 && row.age <= 90 : ageFilter === '91-180' ? row.age >= 91 && row.age <= 180 : row.age >= 181))
+    const queryMatches = !search || n.title.toLowerCase().includes(search.toLowerCase()) || (n.author_name || '').toLowerCase().includes(search.toLowerCase())
+    return genreMatches && tagMatches && statusMatches && ageMatches && queryMatches
+  }), [scored, genreFilter, tagFilter, statusFilter, ageFilter, search])
+  const selected = filtered.find(r => r.novel.id === selectedId) || filtered[0]
+  const metricValues = filtered.map(r => r.values[metricKey]).filter((v): v is number => v != null)
+  const selectedMetric = selected?.values[metricKey] ?? null
+  const metricPct = selectedMetric == null ? null : percentileRank(metricValues, selectedMetric)
+  const mean = metricValues.length ? metricValues.reduce((a,b) => a+b,0) / metricValues.length : null
+  const sorted = [...filtered].sort((a,b) => {
+    const av = sortBy === 'score' ? a.score : sortBy === 'percentile' ? a.percentile : sortBy === 'followers' ? a.values.followers : a.values.average_views
+    const bv = sortBy === 'score' ? b.score : sortBy === 'percentile' ? b.percentile : sortBy === 'followers' ? b.values.followers : b.values.average_views
+    return (bv ?? -1) - (av ?? -1)
   })
-  const ownX = selectedNovel ? getUserMetric(selectedNovel, selectedSnapshot, xMetric) : null
-  const ownY = selectedNovel ? getUserMetric(selectedNovel, selectedSnapshot, yMetric) : null
-  const ownScatter = ownX == null || ownY == null ? [] : [{ x: ownX, y: ownY, name: selectedNovel?.title }]
-  const ageGroups = ['0–90 days','91–180 days','181–270 days','271–360 days','361+ days']
-  const ageRows = ageGroups.map(group => {
-    const peers = categoryFiltered.filter(r => cohort(r.age) === group)
-    const f = peers.map(r=>r.f).filter((v):v is number=>v!=null)
-    const av = peers.map(r=>r.av).filter((v):v is number=>v!=null)
-    const rate = peers.map(r=>getMetric(r,'followRate')).filter((v):v is number=>v!=null)
-    return { group, count: peers.length, followers: median(f), avgViews: median(av), followRate: median(rate) }
-  })
-
-  if (loadError) return <div className="panel"><h2>Benchmark unavailable</h2><p className="error">{loadError}</p></div>
-  if (!baseline.length) return <div className="panel"><h2>Loading benchmark…</h2><p className="muted">Loading the 410-novel baseline.</p></div>
+  const chartData = filtered.flatMap(r => r.score == null ? [] : [{ name: r.novel.title, score: Number(r.score.toFixed(2)) }])
+  const scatterData = filtered.flatMap(r => r.values.average_views == null || r.values.followers == null ? [] : [{ x: r.values.average_views, y: r.values.followers, name: r.novel.title }])
+  const selectedCount = scored.length
+  const withScores = scored.filter(r => r.score != null).length
 
   return <div className="benchmark-explorer">
-    <div className="page-heading"><div><p className="eyebrow">FROZEN REFERENCE DATA · AUG 29, 2026</p><h1>Novel performance</h1><p className="muted">See where your novel ranks against the 410-novel reference dataset. Your novels stay separate from the baseline.</p></div><button className="primary" onClick={() => { setCreateOpen(v => !v); setCreateError('') }}>{createOpen ? 'Close form' : '+ Add my novel'}</button></div>
-    {createOpen && <div className="panel create-novel-panel">
-      <div className="panel-heading"><div><h2>Add a novel to compare</h2><p>Enter its Royal Road URL and latest available metrics. It will be saved to your catalogue, not added to the reference dataset.</p></div></div>
-      <div className="create-novel-grid">
-        <label>Novel title<input value={draftTitle} onChange={e=>setDraftTitle(e.target.value)} placeholder="Novel title" /></label>
-        <label>Royal Road URL<input value={draftUrl} onChange={e=>setDraftUrl(e.target.value)} placeholder="https://www.royalroad.com/fiction/..." /></label>
-        <label>Publication date<input type="date" value={draftPublishedAt} onChange={e=>setDraftPublishedAt(e.target.value)} /></label>
-        <label>Genre<input value={draftGenre} onChange={e=>setDraftGenre(e.target.value)} placeholder="Fantasy, LitRPG…" /></label>
-        <label className="create-tags">Tags<input value={draftTags} onChange={e=>setDraftTags(e.target.value)} placeholder="Comma-separated tags" /></label>
-      </div>
-      <p className="eyebrow create-metrics-label">LATEST METRICS</p>
-      <div className="create-metric-grid">
-        {[
-          ['views','Total views'],['average_views','Average views'],['followers','Followers'],['favorites','Favorites'],
-          ['rating_count','Ratings count'],['rating','Overall rating'],['pages','Pages'],['word_count','Word count'],
-          ['chapters','Chapters'],['overall_score','Overall score'],['style_score','Style score'],['story_score','Story score'],
-          ['grammar_score','Grammar score'],['character_score','Character score']
-        ].map(([key,label])=><label key={key}>{label}<input type="number" min="0" step="any" value={draftMetrics[key] || ''} onChange={e=>setDraftMetrics(old=>({...old,[key]:e.target.value}))} placeholder="—"/></label>)}
-      </div>
-      {createError && <p className="error">{createError}</p>}
-      <div className="create-novel-actions"><span className="muted">You can leave unavailable metrics blank.</span><button className="primary" disabled={createBusy || !draftTitle.trim() || !draftUrl.trim()} onClick={async()=>{
-        setCreateBusy(true); setCreateError('')
-        try {
-          const metrics=Object.fromEntries(Object.entries(draftMetrics).map(([k,v])=>[k,v.trim()===''?null:Number(v)]))
-          if(Object.values(metrics).some(v=>v!==null && (!Number.isFinite(v as number) || (v as number)<0))) throw new Error('Metrics must be non-negative numbers.')
-          if(metrics.rating != null && metrics.rating > 5) throw new Error('Overall rating must be between 0 and 5.')
-          const id=await onCreateNovel({title:draftTitle.trim(),url:draftUrl.trim(),publishedAt:draftPublishedAt,genre:draftGenre.trim(),tags:draftTags,metrics})
-          setSelectedNovelId(id); setCreateOpen(false); setDraftTitle(''); setDraftUrl(''); setDraftPublishedAt(''); setDraftGenre(''); setDraftTags(''); setDraftMetrics({})
-        } catch(error) { setCreateError(error instanceof Error?error.message:'Could not save this novel.') }
-        finally { setCreateBusy(false) }
-      }}>{createBusy?'Saving…':'Save and compare'}</button></div>
-    </div>}
+    <div className="page-heading"><div><p className="eyebrow">CATALOGUE-POWERED ANALYTICS</p><h1>Novel performance</h1><p className="muted">The benchmark is calculated directly from your Catalogue. Import more novels to expand the comparison set.</p></div></div>
     <div className="stat-grid">
-      <div className="stat-card"><div className="stat-top"><span>Baseline novels</span></div><strong>{baseline.length}</strong><small>Unique fiction records</small></div>
-      <div className="stat-card"><div className="stat-top"><span>Baseline median followers</span></div><strong>{fmt(median(baseline.map(r=>r.f).filter((v):v is number=>v!=null)))}</strong><small>Mean: {fmt(summary(baseline.map(r=>r.f).filter((v):v is number=>v!=null)).mean)}</small></div>
-      <div className="stat-card"><div className="stat-top"><span>Baseline median avg. views</span></div><strong>{fmt(median(baseline.map(r=>r.av).filter((v):v is number=>v!=null)))}</strong><small>Mean: {fmt(summary(baseline.map(r=>r.av).filter((v):v is number=>v!=null)).mean)}</small></div>
-      <div className="stat-card"><div className="stat-top"><span>Age ≤ 30 days</span></div><strong>{baseline.filter(r=>r.age<=30).length}</strong><small>Novel records in this cohort</small></div>
+      <div className="stat-card"><div className="stat-top"><span>Benchmark novels</span></div><strong>{fmt(selectedCount)}</strong><small>Catalogue records, excluding your own fiction</small></div>
+      <div className="stat-card"><div className="stat-top"><span>Scored novels</span></div><strong>{fmt(withScores)}</strong><small>Have at least one score component</small></div>
+      <div className="stat-card"><div className="stat-top"><span>Mean performance score</span></div><strong>{withScores ? fmt(scored.reduce((sum,r)=>sum+(r.score ?? 0),0)/withScores) : '—'}</strong><small>0–100 relative composite</small></div>
+      <div className="stat-card"><div className="stat-top"><span>Latest data</span></div><strong>{fmt(scored.filter(r=>r.snapshot).length)}</strong><small>Novels with metric snapshots</small></div>
     </div>
     <div className="panel">
       <div className="benchmark-controls">
-        <label>Genre category<select value={genreFilter} onChange={e=>setGenreFilter(e.target.value)}><option>All genres</option>{genres.map(g=><option key={g}>{g}</option>)}</select></label>
-        <label>Fiction type<select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}><option>All types</option>{types.map(t=><option key={t}>{t}</option>)}</select></label>
-        <label>Publication status<select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option>All statuses</option>{statuses.map(s=><option key={s}>{s}</option>)}</select></label>
+        <label>Search catalogue<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Title or author"/></label>
+        <label>Genre<select value={genreFilter} onChange={e=>setGenreFilter(e.target.value)}><option>All genres</option>{genres.map(g=><option key={g}>{g}</option>)}</select></label>
+        <label>Status<select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option>All statuses</option>{statuses.map(s=><option key={s}>{s}</option>)}</select></label>
         <label>Tag<select value={tagFilter} onChange={e=>setTagFilter(e.target.value)}><option>All tags</option>{tags.map(t=><option key={t}>{t}</option>)}</select></label>
-        <label>Novel to compare<select value={selectedNovelId} onChange={e=>setSelectedNovelId(e.target.value)}><option value="">Select a novel</option>{novels.map(n=><option key={n.id} value={n.id}>{n.title}</option>)}</select></label>
-        <label>Metric<select value={metricKey} onChange={e=>setMetricKey(e.target.value)}>{METRICS.map(m=><option key={m.key} value={m.key}>{m.label}</option>)}</select></label>
-        <label>Age cohort<select value={ageFilter} onChange={e=>setAgeFilter(e.target.value)}>{AGE_FILTERS.map(a=><option key={a.value} value={a.value}>{a.label}</option>)}</select></label>
+        <label>Age cohort<select value={ageFilter} onChange={e=>setAgeFilter(e.target.value)}><option value="all">All ages</option><option value="1-30">1–30 days</option><option value="31-90">31–90 days</option><option value="91-180">91–180 days</option><option value="181+">181+ days</option></select></label>
+        <label>Metric to inspect<select value={metricKey} onChange={e=>setMetricKey(e.target.value as MetricKey)}>{METRICS.map(m=><option key={m.key} value={m.key}>{m.label}</option>)}</select></label>
       </div>
       <div className="benchmark-kpis">
-        <div><span>Baseline records</span><strong>{fmt(values.length)}</strong></div>
-        <div><span>Mean</span><strong>{fmt(stats.mean)}</strong></div>
-        <div><span>Median</span><strong>{fmt(stats.median)}</strong></div>
-        <div><span>Mode</span><strong>{stats.mode}</strong></div>
+        <div><span>Comparison records</span><strong>{filtered.length}</strong></div>
+        <div><span>Mean {METRICS.find(m=>m.key===metricKey)?.label}</span><strong>{fmt(mean)}</strong></div>
+        <div><span>Median</span><strong>{fmt(metricValues.length ? [...metricValues].sort((a,b)=>a-b)[Math.floor(metricValues.length/2)] : null)}</strong></div>
+        <div><span>Metric coverage</span><strong>{metricValues.length} / {filtered.length}</strong></div>
       </div>
-      <div className="benchmark-chart-head"><div><h2>{metric.label} distribution curve</h2><p className="muted">Observed frequency across the selected cohort. This is an empirical curve, not an assumed normal bell curve.</p></div></div>
-      <div className="benchmark-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={histogram} margin={{top:16,right:14,left:0,bottom:28}}><CartesianGrid strokeDasharray="3 3" stroke="#293342"/><XAxis dataKey="range" interval={3} angle={-20} textAnchor="end" height={58} tick={{fill:'#93a0b2',fontSize:10}}/><YAxis allowDecimals={false} tick={{fill:'#93a0b2',fontSize:10}}/><Tooltip contentStyle={{background:'#151e2a',border:'1px solid #344154',borderRadius:8,color:'#eef2f7'}} formatter={(v:any)=>[v,'Novels']}/><Line type="monotone" dataKey="count" stroke="#78bfa0" strokeWidth={2.5} dot={{r:2.5,fill:'#78bfa0'}} activeDot={{r:5}} isAnimationActive={false}/>{markerIndex != null && <ReferenceLine x={histogram[markerIndex]?.range} stroke="#f0b66b" strokeWidth={2} label={{value:'Your novel',fill:'#f0b66b',position:'top'}}/>}</LineChart></ResponsiveContainer></div>
-      {selectedNovel && <div className="benchmark-position benchmark-percentile"><div><b>{selectedNovel.title}</b><span>{ownValue == null ? 'This metric is missing from the latest snapshot.' : <>Your value: <strong>{fmt(ownValue)}</strong></>}</span></div><div className="percentile-score">{rawPct == null ? '—' : rawPct.toFixed(1)+'th'}<small>percentile in current comparison</small></div><div className="percentile-detail">{agePct == null ? 'Age-adjusted percentile unavailable' : agePct.toFixed(1)+'th percentile in its 30-day age band'}</div></div>}
-      <p className="benchmark-note">Counts and percentiles use available values only. The curve uses log-spaced bins for count metrics because the observed distributions are highly skewed; it does not assume a normal distribution. The follower-to-average-view ratio is a comparison proxy, not a true visitor-to-follower conversion rate.</p>
+      {selected && <div className="benchmark-position benchmark-percentile"><div><b>{selected.novel.title}</b><span>Selected catalogue novel · {selected.snapshot ? 'Latest snapshot: ' + new Date(selected.snapshot.captured_at).toLocaleDateString() : 'No metric snapshot'}</span></div><div className="percentile-score">{selected.score == null ? '—' : selected.score.toFixed(1) + ' / 100'}<small>overall performance score · Grade {selected.grade}</small></div><div className="percentile-detail">{selected.percentile == null ? 'Overall percentile unavailable' : selected.percentile.toFixed(1) + 'th percentile overall'}<br/>{metricPct == null ? 'Selected metric percentile unavailable' : metricPct.toFixed(1) + 'th percentile for ' + (METRICS.find(m=>m.key===metricKey)?.label || 'metric')}</div></div>}
+      <p className="benchmark-note">Percentiles are calculated against the currently filtered Catalogue set. The overall score is a weighted average of each available metric's percentile: followers 25%, average views 20%, follower-to-average-view ratio 20%, rating 15%, ratings count 10%, and favorites 10%. Missing components are excluded and the remaining weights are renormalized. This measures relative platform performance, not literary quality. Grade bands: A ≥90, B ≥80, C ≥70, D ≥60, E below 60.</p>
     </div>
     <div className="panel">
-      <div className="panel-heading"><div><h2>Combine two metrics</h2><p>Explore how two measures relate across the same benchmark novels.</p></div></div>
-      <div className="benchmark-controls"><label>X-axis metric<select value={xMetric} onChange={e=>setXMetric(e.target.value)}>{METRICS.map(m=><option key={m.key} value={m.key}>{m.label}</option>)}</select></label><label>Y-axis metric<select value={yMetric} onChange={e=>setYMetric(e.target.value)}>{METRICS.map(m=><option key={m.key} value={m.key}>{m.label}</option>)}</select></label></div>
-      <div className="benchmark-chart"><ResponsiveContainer width="100%" height="100%"><ScatterChart margin={{top:16,right:20,bottom:24,left:8}}><CartesianGrid strokeDasharray="3 3" stroke="#293342"/><XAxis type="number" dataKey="x" name={xDef.label} tick={{fill:'#93a0b2',fontSize:10}} label={{value:xDef.short,position:'insideBottom',offset:-12,fill:'#93a0b2'}}/><YAxis type="number" dataKey="y" name={yDef.label} tick={{fill:'#93a0b2',fontSize:10}} label={{value:yDef.short,angle:-90,position:'insideLeft',fill:'#93a0b2'}}/><Tooltip cursor={{strokeDasharray:'3 3'}} contentStyle={{background:'#151e2a',border:'1px solid #344154',borderRadius:8,color:'#eef2f7'}}/><Scatter name="Benchmark novels" data={scatterData} fill="#7c91ae" fillOpacity={0.45}/><Scatter name="Your novel" data={ownScatter} fill="#f0b66b" shape="star"/></ScatterChart></ResponsiveContainer></div>
-      <p className="benchmark-note">{scatterData.length} benchmark novels have both metrics available. Your selected novel is highlighted separately when both values exist.</p>
+      <div className="panel-heading"><div><h2>Overall score distribution</h2><p>Composite score for each novel in the current comparison set.</p></div></div>
+      <div className="benchmark-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" stroke="#293342"/><XAxis dataKey="name" hide/><YAxis domain={[0,100]} tick={{fill:'#93a0b2',fontSize:10}}/><Tooltip contentStyle={{background:'#151e2a',border:'1px solid #344154',borderRadius:8,color:'#eef2f7'}}/><Bar dataKey="score" name="Performance score" fill="#78bfa0"/></BarChart></ResponsiveContainer></div>
     </div>
     <div className="panel">
-      <div className="panel-heading"><div><h2>Overall benchmark values</h2><p>Mean, median and mode across all 410 records. Ratings are available for only a subset.</p></div></div>
-      <div className="table-wrap"><table><thead><tr><th>Metric</th><th>Available</th><th>Mean</th><th>Median</th><th>Mode</th><th>Range</th></tr></thead><tbody>{METRICS.map(m=>{const vals=baseline.map(r=>getMetric(r,m.key)).filter((v):v is number=>v!=null);const s=summary(vals);return <tr key={m.key}><td>{m.label}</td><td>{s.count}</td><td>{fmt(s.mean)}</td><td>{fmt(s.median)}</td><td>{s.mode}</td><td>{vals.length?fmt(Math.min(...vals))+' – '+fmt(Math.max(...vals)):'—'}</td></tr>})}</tbody></table></div>
+      <div className="panel-heading"><div><h2>Followers vs. average views</h2><p>Each point represents one Catalogue novel.</p></div></div>
+      <div className="benchmark-chart"><ResponsiveContainer width="100%" height="100%"><ScatterChart margin={{top:16,right:20,bottom:24,left:8}}><CartesianGrid strokeDasharray="3 3" stroke="#293342"/><XAxis type="number" dataKey="x" name="Average views" tick={{fill:'#93a0b2',fontSize:10}}/><YAxis type="number" dataKey="y" name="Followers" tick={{fill:'#93a0b2',fontSize:10}}/><Tooltip cursor={{strokeDasharray:'3 3'}} contentStyle={{background:'#151e2a',border:'1px solid #344154',borderRadius:8,color:'#eef2f7'}}/><Scatter name="Catalogue novels" data={scatterData} fill="#78bfa0" fillOpacity={0.65}/></ScatterChart></ResponsiveContainer></div>
+      <p className="benchmark-note">{scatterData.length} novels have both metrics available.</p>
     </div>
     <div className="panel">
-      <div className="panel-heading"><div><h2>Performance by 90-day age cohort</h2><p>Median values from the original scrape date, August 29, 2026.</p></div></div>
-      <div className="table-wrap"><table><thead><tr><th>Age cohort</th><th>Novels</th><th>Median followers</th><th>Median avg. views</th><th>Median followers / avg. views</th></tr></thead><tbody>{ageRows.map(row=><tr key={row.group}><td>{row.group}</td><td>{row.count}</td><td>{fmt(row.followers)}</td><td>{fmt(row.avgViews)}</td><td>{row.followRate==null?'—':row.followRate.toFixed(2)+'%'}</td></tr>)}</tbody></table></div>
+      <div className="panel-heading"><div><h2>Novel rankings</h2><p>Every novel receives one composite score and an overall percentile.</p></div><label>Sort by<select value={sortBy} onChange={e=>setSortBy(e.target.value as typeof sortBy)}><option value="score">Performance score</option><option value="percentile">Percentile</option><option value="followers">Followers</option><option value="views">Average views</option></select></label></div>
+      <div className="table-wrap"><table><thead><tr><th>Rank</th><th>Novel</th><th>Score / 100</th><th>Grade</th><th>Overall percentile</th><th>Followers</th><th>Avg. views</th><th>Follower ratio</th><th>Coverage</th></tr></thead><tbody>{sorted.map((row,index)=><tr key={row.novel.id} onClick={()=>setSelectedId(row.novel.id)} style={{cursor:'pointer',background:selected?.novel.id===row.novel.id?'#202e39':undefined}}><td>{index+1}</td><td><a className="novel-title" href={row.novel.fiction_url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()}>{row.novel.title}</a><small>{row.novel.author_name || 'Unknown author'}</small></td><td>{row.score == null ? '—' : row.score.toFixed(1)}</td><td>{row.grade}</td><td>{row.percentile == null ? '—' : row.percentile.toFixed(1) + 'th'}</td><td>{fmt(row.values.followers)}</td><td>{fmt(row.values.average_views)}</td><td>{row.values.follow_rate == null ? '—' : row.values.follow_rate.toFixed(2)+'%'}</td><td>{row.coverage} / {SCORE_WEIGHTS.length}</td></tr>)}</tbody></table></div>
+      {!sorted.length && <p className="muted">No Catalogue novels match these filters. Import novels or adjust the filters.</p>}
     </div>
   </div>
 }
