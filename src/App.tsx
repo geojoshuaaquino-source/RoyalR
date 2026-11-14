@@ -3,7 +3,7 @@ import Papa from 'papaparse'
 import {
   Activity, BookOpen, ChartNoAxesCombined, ChevronRight, CircleHelp, CloudUpload,
   Database, Eye, Heart, LogOut, Plus, RefreshCw, Search, ShieldCheck, Star,
-  Users, X
+  Users, X, Globe
 } from 'lucide-react'
 import { supabase, supabaseConfigured } from './lib/supabase'
 
@@ -18,7 +18,7 @@ type Snapshot = {
   rating_count: number | null; review_count: number | null; average_views: number | null;
   chapters: number | null; pages: number | null;
 }
-type Tab = 'overview' | 'catalogue' | 'watchlist' | 'import' | 'statistics'
+type Tab = 'overview' | 'catalogue' | 'watchlist' | 'import' | 'scrape' | 'statistics'
 type ImportRow = Record<string, unknown>
 
 const numberValue = (v: unknown): number | null => {
@@ -73,6 +73,10 @@ export default function App() {
   const [importError, setImportError] = useState('')
   const [importBusy, setImportBusy] = useState(false)
   const [watchImported, setWatchImported] = useState(false)
+  const [scrapeInput, setScrapeInput] = useState('')
+  const [scrapeBusy, setScrapeBusy] = useState(false)
+  const [scrapeProgress, setScrapeProgress] = useState({ done: 0, total: 0 })
+  const [watchScraped, setWatchScraped] = useState(false)
   const [notice, setNotice] = useState('')
 
   useEffect(() => {
@@ -319,6 +323,105 @@ export default function App() {
     setImportBusy(false)
   }
 
+  async function runScrape() {
+    if (!session?.user?.id || scrapeBusy) return
+    const urls = [...new Set(scrapeInput.split(/[\\s,]+/).map(value => value.trim()).filter(Boolean))]
+    if (!urls.length) { setImportError('Enter at least one Royal Road fiction URL.'); return }
+    if (urls.length > 500) { setImportError('The limit is 500 fiction URLs per scrape batch.'); return }
+    setScrapeBusy(true); setImportError(''); setNotice('')
+    setScrapeProgress({ done: 0, total: urls.length })
+    const uid = session.user.id
+    const runResult = await supabase.from('ingestion_runs')
+      .insert({ user_id: uid, source_type: 'royalroad_scrape', source_label: 'Manual Royal Road scrape' })
+      .select('id').single()
+    if (runResult.error) { setImportError(runResult.error.message); setScrapeBusy(false); return }
+    const runId = runResult.data.id
+    const novelsFound: any[] = []
+    const snapshotsFound: any[] = []
+    const errors: any[] = []
+    let stoppedByAccess = false
+    for (let i = 0; i < urls.length; i++) {
+      const raw = urls[i]
+      try {
+        const normalized = raw.startsWith('http') ? raw : 'https://' + raw
+        const response = await fetch('/api/royalroad', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: normalized }),
+        })
+        const result = await response.json()
+        if (!response.ok || !result.ok) {
+          errors.push({ user_id: uid, run_id: runId, row_number: i + 1, fiction_url: normalized, error_code: result.status === 403 ? 'HTTP_403' : result.status === 429 ? 'HTTP_429' : 'SCRAPE_FAILED', error_message: result.error || 'Scrape failed.', raw_row: { url: normalized, status: result.status || response.status } })
+          if (result.status === 403 || result.status === 429) { stoppedByAccess = true; break }
+        } else {
+          novelsFound.push({ ...result.novel, user_id: uid, last_seen_at: new Date().toISOString() })
+          if (result.metrics) snapshotsFound.push({ url: result.novel.fiction_url, metrics: result.metrics })
+          if (result.note) errors.push({ user_id: uid, run_id: runId, row_number: i + 1, fiction_url: normalized, error_code: 'PARTIAL_METADATA', error_message: result.note, raw_row: { url: normalized } })
+        }
+      } catch (error) {
+        errors.push({ user_id: uid, run_id: runId, row_number: i + 1, fiction_url: raw, error_code: 'NETWORK_ERROR', error_message: error instanceof Error ? error.message : 'Network request failed.', raw_row: { url: raw } })
+      }
+      setScrapeProgress({ done: i + 1, total: urls.length })
+      // Keep requests sequential and paced; do not parallelize requests to Royal Road.
+      if (i < urls.length - 1) await new Promise(resolve => setTimeout(resolve, 900))
+    }
+    let created = 0, updated = 0, failures = 0
+    try {
+      const uniqueNovels = [...new Map(novelsFound.map(n => [n.fiction_url, n])).values()]
+      const urlsToSave = uniqueNovels.map(n => n.fiction_url)
+      const existing = urlsToSave.length
+        ? await supabase.from('novels').select('id,fiction_url').eq('user_id', uid).in('fiction_url', urlsToSave)
+        : { data: [], error: null }
+      if (existing.error) throw existing.error
+      const existed = new Set((existing.data || []).map(x => x.fiction_url))
+      uniqueNovels.forEach(n => existed.has(n.fiction_url) ? updated++ : created++)
+      if (uniqueNovels.length) {
+        const saved = await supabase.from('novels').upsert(uniqueNovels, { onConflict: 'user_id,fiction_url' })
+        if (saved.error) throw saved.error
+      }
+      const savedRows = urlsToSave.length
+        ? await supabase.from('novels').select('id,fiction_url').eq('user_id', uid).in('fiction_url', urlsToSave)
+        : { data: [], error: null }
+      if (savedRows.error) throw savedRows.error
+      const idByUrl = new Map((savedRows.data || []).map(x => [x.fiction_url, x.id]))
+      const metricRows = snapshotsFound.flatMap(item => {
+        const novelId = idByUrl.get(item.url)
+        if (!novelId) return []
+        const metrics = item.metrics
+        return Object.values(metrics).some(value => value !== null)
+          ? [{ user_id: uid, novel_id: novelId, source_type: 'royalroad_scrape', ...metrics }]
+          : []
+      })
+      if (metricRows.length) {
+        const savedMetrics = await supabase.from('metric_snapshots').insert(metricRows)
+        if (savedMetrics.error) throw savedMetrics.error
+      }
+      const excluded = uniqueNovels.filter(n => n.source_id === '183032' || n.fiction_url.includes('/fiction/183032') || n.title.toLowerCase().includes('dungeons in denver'))
+      if (excluded.length) {
+        const exclusionRows = excluded.map(n => ({ user_id: uid, novel_id: idByUrl.get(n.fiction_url), reason: 'User-owned novel; excluded from benchmark calculations.' }))
+        const savedExclusions = await supabase.from('benchmark_exclusions').upsert(exclusionRows, { onConflict: 'user_id,novel_id' })
+        if (savedExclusions.error) throw savedExclusions.error
+      }
+      if (watchScraped && urlsToSave.length) {
+        const watchRows = urlsToSave.map(url => ({ user_id: uid, novel_id: idByUrl.get(url), cadence: 'weekly', enabled: true }))
+        const savedWatch = await supabase.from('watchlist').upsert(watchRows, { onConflict: 'user_id,novel_id' })
+        if (savedWatch.error) throw savedWatch.error
+      }
+    } catch (error) {
+      failures = novelsFound.length
+      errors.push({ user_id: uid, run_id: runId, row_number: 0, fiction_url: null, error_code: 'SAVE_FAILED', error_message: error instanceof Error ? error.message : 'Could not save scraped records.', raw_row: {} })
+    }
+    if (errors.length) await supabase.from('ingestion_run_errors').insert(errors)
+    await supabase.from('ingestion_runs').update({
+      finished_at: new Date().toISOString(), records_seen: urls.length,
+      records_created: created, records_updated: updated, records_skipped: urls.length - novelsFound.length,
+      failures, run_status: failures || errors.length ? 'completed_with_errors' : 'completed',
+    }).eq('id', runId)
+    await loadData()
+    setNotice(`Scrape finished: ${created} new novels, ${updated} updated, ${snapshotsFound.length} metric captures, ${errors.length} issues.${stoppedByAccess ? ' Stopped because Royal Road denied or rate-limited access.' : ''}`)
+    setScrapeBusy(false)
+    if (novelsFound.length) setTab('catalogue')
+  }
+
   async function toggleWatch(novelId: string) {
     if (!session?.user?.id) return
     const isWatching = watchIds.includes(novelId)
@@ -346,7 +449,8 @@ export default function App() {
     { id: 'overview', label: 'Overview', icon: ChartNoAxesCombined },
     { id: 'catalogue', label: 'Catalogue', icon: BookOpen },
     { id: 'watchlist', label: 'Watchlist', icon: Eye },
-    { id: 'import', label: 'Import data', icon: CloudUpload },
+    { id: 'import', label: 'CSV import', icon: CloudUpload },
+    { id: 'scrape', label: 'Royal Road scraper', icon: Globe },
     { id: 'statistics', label: 'Statistics', icon: Activity },
   ]
   const rows = tab === 'watchlist' ? filteredNovels.filter(n => watchIds.includes(n.id)) : filteredNovels
@@ -391,6 +495,26 @@ export default function App() {
             <button className="primary full" disabled={!preview.length || importBusy || !!importError} onClick={() => void runImport()}>{importBusy ? 'Importing…' : `Import ${preview.length || 0} novels`}</button>
           </div><div className="panel"><h2>Supported columns</h2><div className="field-list">{['url (required)','title','author','published_at','genre','tags','status','chapters','pages','views','followers','favorites','rating','rating_count','review_count','average_views'].map(x => <code key={x}>{x}</code>)}</div><div className="info-strip compact"><ShieldCheck size={16}/><span>CSV imports are stored under your account. Snapshots are preserved as history, not overwritten.</span></div></div></div>
           {preview.length > 0 && <div className="panel preview-panel"><div className="panel-heading"><div><h2>Import preview</h2><p>Showing the first five rows.</p></div><span className="pill">{preview.length} rows</span></div><div className="table-wrap"><table><thead><tr><th>Title</th><th>Author</th><th>Views</th><th>Followers</th><th>Rating</th></tr></thead><tbody>{preview.slice(0,5).map((r,i)=><tr key={i}><td>{String(r.title || r.url || r.fiction_url || '—')}</td><td>{String(r.author || '—')}</td><td>{fmt(numberValue(r.views))}</td><td>{fmt(numberValue(r.followers))}</td><td>{fmt(numberValue(r.rating))}</td></tr>)}</tbody></table></div></div>}
+        </>}
+        {tab === 'scrape' && <>
+          <div className="page-heading"><div><p className="eyebrow">DATA INGESTION</p><h1>Royal Road scraper</h1><p className="muted">Fetch public fiction pages and save the metadata and metrics that are visible to this server.</p></div></div>
+          <div className="import-layout">
+            <div className="panel import-panel">
+              <h2>Fiction URLs</h2>
+              <p className="muted">Paste one Royal Road fiction URL per line. Up to 500 per batch. Requests are made sequentially with a delay.</p>
+              <textarea className="scrape-input" value={scrapeInput} onChange={e => setScrapeInput(e.target.value)} placeholder={'https://www.royalroad.com/fiction/12345/example-novel\\nhttps://www.royalroad.com/fiction/67890/another-novel'} disabled={scrapeBusy}/>
+              <label className="check-row"><input type="checkbox" checked={watchScraped} onChange={e => setWatchScraped(e.target.checked)} disabled={scrapeBusy}/> Add successfully scraped novels to weekly watchlist</label>
+              {scrapeBusy && <div className="scrape-progress"><div><span>Scraping pages</span><b>{scrapeProgress.done} / {scrapeProgress.total}</b></div><div className="progress-track"><i style={{ width: (scrapeProgress.total ? scrapeProgress.done / scrapeProgress.total * 100 : 0) + '%' }}/></div></div>}
+              {importError && <p className="error">{importError}</p>}
+              <button className="primary full" disabled={scrapeBusy || !scrapeInput.trim()} onClick={() => void runScrape()}>{scrapeBusy ? 'Scraping…' : 'Start scrape'}</button>
+            </div>
+            <div className="panel">
+              <h2>What it collects</h2>
+              <div className="field-list">{['Title and author (when exposed)','Publication date and genre (when exposed)','Chapter count and status (when exposed)','Views, followers, favorites and rating (when exposed)','Timestamped metric snapshots'].map(x => <code key={x}>{x}</code>)}</div>
+              <div className="info-strip compact"><ShieldCheck size={16}/><span>Only ordinary public-page requests are used. HTTP 403, 429, CAPTCHA and other access denials are respected; no proxy rotation or access-control bypass.</span></div>
+              <p className="muted">Royal Road may change its page markup or block server requests. Missing fields are left blank rather than guessed. CSV import remains available as a fallback.</p>
+            </div>
+          </div>
         </>}
         {tab === 'statistics' && <>
           <div className="page-heading"><div><p className="eyebrow">BENCHMARKS</p><h1>Statistics</h1><p className="muted">Descriptive metrics from the latest imported snapshots.</p></div></div>
