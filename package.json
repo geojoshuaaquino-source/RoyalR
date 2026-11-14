@@ -14,7 +14,9 @@
     "papaparse": "^5.5.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "recharts": "^2.15.4"
+    "recharts": "^2.15.4",
+    "@sparticuz/chromium": "153.0.0",
+    "puppeteer-core": "~25.11.0"
   },
   "devDependencies": {
     "@types/papaparse": "^5.3.16",
