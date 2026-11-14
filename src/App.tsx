@@ -74,6 +74,8 @@ export default function App() {
   const [importBusy, setImportBusy] = useState(false)
   const [watchImported, setWatchImported] = useState(false)
   const [scrapeInput, setScrapeInput] = useState('')
+  const [latestPage, setLatestPage] = useState('1')
+  const [discoverBusy, setDiscoverBusy] = useState(false)
   const [scrapeBusy, setScrapeBusy] = useState(false)
   const [scrapeProgress, setScrapeProgress] = useState({ done: 0, total: 0 })
   const [watchScraped, setWatchScraped] = useState(false)
@@ -323,6 +325,32 @@ export default function App() {
     setImportBusy(false)
   }
 
+  async function discoverLatestUpdates() {
+    if (!session?.access_token || discoverBusy || scrapeBusy) return
+    const page = Math.max(1, Math.min(20, Math.floor(Number(latestPage) || 1)))
+    setDiscoverBusy(true); setImportError(''); setNotice('')
+    try {
+      const response = await fetch('/api/royalroad', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ mode: 'discover_latest_updates', page }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.ok) {
+        setImportError(result.error || 'Could not read Latest Updates.')
+      } else if (!result.fictions?.length) {
+        setImportError('The page was readable, but no fiction URLs were detected. Royal Road may have changed its markup.')
+      } else {
+        const urls = result.fictions.map((item: { url: string }) => item.url)
+        setScrapeInput(old => [...new Set([...old.split(/[\\s,]+/).filter(Boolean), ...urls])].join('\\n'))
+        setNotice(`Extracted ${urls.length} fiction URLs from Latest Updates page ${page}. Review the list, then start the scrape.`)
+      }
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Latest Updates request failed.')
+    }
+    setDiscoverBusy(false)
+  }
+
   async function runScrape() {
     if (!session?.user?.id || scrapeBusy) return
     const urls = [...new Set(scrapeInput.split(/[\\s,]+/).map(value => value.trim()).filter(Boolean))]
@@ -504,13 +532,19 @@ export default function App() {
           <div className="page-heading"><div><p className="eyebrow">DATA INGESTION</p><h1>Royal Road scraper</h1><p className="muted">Fetch public fiction pages and save the metadata and metrics that are visible to this server.</p></div></div>
           <div className="import-layout">
             <div className="panel import-panel">
+              <h2>Discover from Latest Updates</h2>
+              <p className="muted">Extract fiction links directly from Royal Road's Latest Updates page. Choose a page, extract its URLs, then scrape them.</p>
+              <div className="toolbar">
+                <label className="small">Page <input type="number" min="1" max="20" value={latestPage} onChange={e => setLatestPage(e.target.value)} disabled={discoverBusy || scrapeBusy}/></label>
+                <button className="secondary" disabled={discoverBusy || scrapeBusy} onClick={() => void discoverLatestUpdates()}>{discoverBusy ? 'Extracting…' : 'Extract fiction URLs'}</button>
+              </div>
               <h2>Fiction URLs</h2>
-              <p className="muted">Paste one Royal Road fiction URL per line. Up to 500 per batch. Requests are made sequentially with a delay.</p>
-              <textarea className="scrape-input" value={scrapeInput} onChange={e => setScrapeInput(e.target.value)} placeholder={'https://www.royalroad.com/fiction/12345/example-novel\\nhttps://www.royalroad.com/fiction/67890/another-novel'} disabled={scrapeBusy}/>
+              <p className="muted">Extracted links appear here; you can also paste URLs manually. Up to 500 per batch. Fiction pages are fetched sequentially with a delay.</p>
+              <textarea className="scrape-input" value={scrapeInput} onChange={e => setScrapeInput(e.target.value)} placeholder={'Extract links above or paste Royal Road fiction URLs, one per line.'} disabled={scrapeBusy}/>
               <label className="check-row"><input type="checkbox" checked={watchScraped} onChange={e => setWatchScraped(e.target.checked)} disabled={scrapeBusy}/> Add successfully scraped novels to weekly watchlist</label>
               {scrapeBusy && <div className="scrape-progress"><div><span>Scraping pages</span><b>{scrapeProgress.done} / {scrapeProgress.total}</b></div><div className="progress-track"><i style={{ width: (scrapeProgress.total ? scrapeProgress.done / scrapeProgress.total * 100 : 0) + '%' }}/></div></div>}
               {importError && <p className="error">{importError}</p>}
-              <button className="primary full" disabled={scrapeBusy || !scrapeInput.trim()} onClick={() => void runScrape()}>{scrapeBusy ? 'Scraping…' : 'Start scrape'}</button>
+              <button className="primary full" disabled={scrapeBusy || discoverBusy || !scrapeInput.trim()} onClick={() => void runScrape()}>{scrapeBusy ? 'Scraping…' : 'Start scrape'}</button>
             </div>
             <div className="panel">
               <h2>What it collects</h2>
