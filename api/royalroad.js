@@ -73,6 +73,49 @@ export default async function handler(req, res) {
   } catch {
     return res.status(503).json({ error: "Could not verify your session with Supabase." });
   }
+
+  if (req.body?.mode === "discover_latest_updates") {
+    const requestedPage = Number(req.body?.page || 1);
+    const page = Number.isInteger(requestedPage) ? Math.min(20, Math.max(1, requestedPage)) : 1;
+    const latestUrl = new URL("https://www.royalroad.com/fictions/latest-updates");
+    if (page > 1) latestUrl.searchParams.set("page", String(page));
+    try {
+      const response = await fetch(latestUrl.toString(), {
+        method: "GET",
+        headers: { "Accept": "text/html,application/xhtml+xml", "User-Agent": "RoyalRAnalytics/1.0 (user-initiated public page fetch)" },
+        redirect: "follow",
+        signal: AbortSignal.timeout(9000),
+      });
+      if (response.status === 403 || response.status === 429) {
+        return res.status(200).json({ ok: false, status: response.status, error: response.status === 403
+          ? "Royal Road denied the Latest Updates request (HTTP 403). No access-control bypass is attempted."
+          : "Royal Road rate-limited the Latest Updates request (HTTP 429). Wait before trying again." });
+      }
+      if (!response.ok) return res.status(200).json({ ok: false, status: response.status, error: "Royal Road returned HTTP " + response.status + " for Latest Updates." });
+      const html = await response.text();
+      if (!html || /captcha|verify you are human|access denied/i.test(cleanText(html).slice(0, 1200))) {
+        return res.status(200).json({ ok: false, error: "Royal Road did not return a readable Latest Updates page." });
+      }
+      const found = new Map();
+      for (const match of html.matchAll(/<a\\b[^>]*href\\s*=\\s*["']([^"']*\\/fiction\\/\\d+(?:\\/[^"'?#]*)?(?:\\?[^"']*)?)["'][^>]*>([\\s\\S]*?)<\\/a>/gi)) {
+        let fictionUrl;
+        try {
+          fictionUrl = new URL(decode(match[1]), "https://www.royalroad.com");
+        } catch { continue; }
+        if (!allowedHost(fictionUrl.hostname) || !/^\\/fiction\\/\\d+(?:\\/|$)/i.test(fictionUrl.pathname)) continue;
+        fictionUrl.search = "";
+        fictionUrl.hash = "";
+        const canonical = "https://www.royalroad.com" + fictionUrl.pathname;
+        const title = cleanText(match[2]).trim();
+        if (!found.has(canonical)) found.set(canonical, { url: canonical, title: title || null });
+      }
+      return res.status(200).json({ ok: true, page, source_url: latestUrl.toString(), fictions: [...found.values()] });
+    } catch (error) {
+      const message = error?.name === "TimeoutError" ? "Latest Updates did not respond before the 9-second timeout." : "Could not fetch Latest Updates: " + (error?.message || "unknown network error");
+      return res.status(200).json({ ok: false, error: message });
+    }
+  }
+
   const rawUrl = typeof req.body?.url === "string" ? req.body.url : "";
   let url;
   try { url = new URL(rawUrl); } catch { return res.status(400).json({ error: "Invalid URL." }); }
