@@ -309,9 +309,8 @@ export default function App() {
             character_score: numberValue(row.character_score ?? row.character_rating ?? row.characterscore),
           }
           if (metricKeys.some(k => metrics[k] !== null) || Object.values(extendedMetrics).some(v => v !== null)) {
-            // Chapter arrays and long descriptions can dominate a JSON export; the app only needs their count.
-            const { chapters: _chapters, description: _description, ...compactRawRow } = row
-            snapshotRows.push({ user_id: uid, novel_id: novelId, source_type: 'file_import', ...metrics, raw_data: { ...compactRawRow, ...extendedMetrics } })
+            // Preserve the full source row; small insert batches keep large JSON exports manageable.
+            snapshotRows.push({ user_id: uid, novel_id: novelId, source_type: 'file_import', ...metrics, raw_data: { ...row, ...extendedMetrics } })
           }
           const title = String(row.title || '').toLowerCase()
           if (url.includes('/fiction/183032') || title.includes('dungeons in denver')) exclusionRows.push({ user_id: uid, novel_id: novelId, reason: 'User-owned novel; excluded from benchmark calculations.' })
