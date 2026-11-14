@@ -162,7 +162,6 @@ export default function BenchmarkExplorer({ novels, latestByNovel, onCreateNovel
   const metric = METRICS.find(m => m.key === metricKey) || METRICS[2]
   const values = filtered.map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
   const ownValue = selectedNovel ? getUserMetric(selectedNovel, selectedSnapshot, metricKey) : null
-  const allMetricValues = categoryFiltered.map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
   const stats = summary(values)
   const rawPct = ownValue == null ? null : percentile(values, ownValue)
   const agePeers = selectedAge == null ? [] : categoryFiltered.filter(r => Math.floor((r.age - 1) / 30) === Math.floor((selectedAge - 1) / 30)).map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
