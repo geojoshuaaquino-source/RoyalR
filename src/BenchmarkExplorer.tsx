@@ -86,7 +86,7 @@ const summary = (values: number[]) => {
   const modes = [...counts.entries()].filter(([,n]) => n === maxCount).map(([v]) => v).sort((a,b)=>a-b)
   return { mean: values.reduce((a,b)=>a+b,0)/values.length, median: median(values), mode: modes.slice(0,3).map(fmt).join(', ') + (modes.length > 3 ? '…' : ''), count: values.length }
 }
-const cohort = (age: number) => age <= 90 ? '1–90 days' : age <= 180 ? '91–180 days' : age <= 270 ? '181–270 days' : age <= 360 ? '271–360 days' : '361+ days'
+const cohort = (age: number) => age <= 90 ? '0–90 days' : age <= 180 ? '91–180 days' : age <= 270 ? '181–270 days' : age <= 360 ? '271–360 days' : '361+ days'
 const ageOf = (publishedAt: string | null) => publishedAt ? Math.max(0, Math.floor((Date.now() - new Date(publishedAt).getTime()) / 86400000)) : null
 
 export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: UserNovel[]; latestByNovel: Map<string, UserSnapshot> }) {
