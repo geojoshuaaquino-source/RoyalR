@@ -345,7 +345,11 @@ export default function App() {
       try {
         const normalized = raw.startsWith('http') ? raw : 'https://' + raw
         const response = await fetch('/api/royalroad', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
           body: JSON.stringify({ url: normalized }),
         })
         const result = await response.json()
