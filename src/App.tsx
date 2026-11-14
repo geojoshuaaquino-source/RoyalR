@@ -582,10 +582,10 @@ export default function App() {
           <div className="panel"><NovelTable novels={rows} latest={latestByNovel} watchIds={watchIds} onWatch={toggleWatch}/>{!rows.length && <Empty title={tab === 'watchlist' ? 'Nothing monitored yet' : 'No novels found'} text="Import novels, then add the ones you want to monitor to your watchlist." action="Import novels" onClick={() => setTab('import')}/>}</div>
         </>}
         {tab === 'import' && <>
-          <div className="page-heading"><div><p className="eyebrow">DATA INGESTION</p><h1>Import novels</h1><p className="muted">Upload a CSV or JSON export. Each batch supports up to 500 novels.</p></div></div>
+          <div className="page-heading"><div><p className="eyebrow">DATA INGESTION</p><h1>Import novels</h1><p className="muted">Upload a CSV or JSON export up to 25 MB, with as many as 10,000 novels per file.</p></div></div>
           <div className="import-layout"><div className="panel import-panel">
-            <h2>Upload CSV or JSON</h2><p className="muted">Required: <code>url</code> or <code>fiction_url</code>. Other fields are optional.</p>
-            <label className="dropzone"><CloudUpload size={28}/><b>{file ? file.name : 'Choose a CSV or JSON file'}</b><span>{file ? `${preview.length} rows detected` : 'Select a file from your device'}</span><input type="file" accept=".csv,.json,text/csv,application/json" onChange={e => chooseFile(e.target.files?.[0] || null)}/></label>
+            <h2>Upload CSV or JSON</h2><p className="muted">Required: <code>url</code> or <code>fiction_url</code>. Files are processed in small database batches.</p>
+            <label className="dropzone"><CloudUpload size={28}/><b>{file ? file.name : 'Choose a CSV or JSON file'}</b><span>{file ? `${preview.length} rows detected` : 'Up to 25 MB · 10,000 rows per file'}</span><input type="file" accept=".csv,.json,text/csv,application/json" onChange={e => chooseFile(e.target.files?.[0] || null)}/></label>
             <label className="check-row"><input type="checkbox" checked={watchImported} onChange={e => setWatchImported(e.target.checked)}/> Add imported novels to weekly watchlist</label>
             {importError && <p className="error">{importError}</p>}
             <button className="primary full" disabled={!preview.length || importBusy || !!importError} onClick={() => void runImport()}>{importBusy ? 'Importing…' : `Import ${preview.length || 0} novels`}</button>
