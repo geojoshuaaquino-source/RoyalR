@@ -78,9 +78,28 @@ export default function App() {
     if (!session?.user?.id) return
     setLoading(true)
     const uid = session.user.id
+    const pageSize = 1000
     const [n, s, w] = await Promise.all([
-      supabase.from('novels').select('id,fiction_url,title,author_name,genre,publication_status,chapter_count,page_count,published_at,tags').eq('user_id', uid).order('updated_at', { ascending: false }),
-      supabase.from('metric_snapshots').select('id,novel_id,captured_at,views,followers,favorites,rating,rating_count,review_count,average_views,chapters,pages,raw_data').eq('user_id', uid).order('captured_at', { ascending: false }),
+      (async () => {
+        const all: Novel[] = []
+        for (let offset = 0; ; offset += pageSize) {
+          const page = await supabase.from('novels').select('id,fiction_url,title,author_name,genre,publication_status,chapter_count,page_count,published_at,tags').eq('user_id', uid).order('updated_at', { ascending: false }).range(offset, offset + pageSize - 1)
+          if (page.error) return { data: null, error: page.error }
+          all.push(...(page.data || []) as Novel[])
+          if (!page.data || page.data.length < pageSize) break
+        }
+        return { data: all, error: null }
+      })(),
+      (async () => {
+        const all: Snapshot[] = []
+        for (let offset = 0; ; offset += pageSize) {
+          const page = await supabase.from('metric_snapshots').select('id,novel_id,captured_at,views,followers,favorites,rating,rating_count,review_count,average_views,chapters,pages,raw_data').eq('user_id', uid).order('captured_at', { ascending: false }).range(offset, offset + pageSize - 1)
+          if (page.error) return { data: null, error: page.error }
+          all.push(...(page.data || []) as Snapshot[])
+          if (!page.data || page.data.length < pageSize) break
+        }
+        return { data: all, error: null }
+      })(),
       supabase.from('watchlist').select('novel_id').eq('user_id', uid).eq('enabled', true),
     ])
     if (n.error || s.error || w.error) setNotice(n.error?.message || s.error?.message || w.error?.message || 'Could not load data.')
