@@ -71,6 +71,16 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: {
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'score' | 'percentile' | 'followers' | 'views'>('score')
   const [selectedId, setSelectedId] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createBusy, setCreateBusy] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const [draftTitle, setDraftTitle] = useState('')
+  const [draftUrl, setDraftUrl] = useState('')
+  const [draftPublishedAt, setDraftPublishedAt] = useState('')
+  const [draftGenre, setDraftGenre] = useState('')
+  const [draftTags, setDraftTags] = useState('')
+  const [draftMetrics, setDraftMetrics] = useState<Record<string, string>>({})
+
 
   const scored = useMemo(() => {
     const eligible = novels.filter(n => !n.fiction_url.includes('/fiction/183032') && !n.title.toLowerCase().includes('dungeons in denver'))
@@ -131,7 +141,38 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: {
   const withScores = scored.filter(r => r.score != null).length
 
   return <div className="benchmark-explorer">
-    <div className="page-heading"><div><p className="eyebrow">CATALOGUE-POWERED ANALYTICS</p><h1>Novel performance</h1><p className="muted">The benchmark is calculated directly from your Catalogue. Import more novels to expand the comparison set.</p></div></div>
+    <div className="page-heading"><div><p className="eyebrow">CATALOGUE-POWERED ANALYTICS</p><h1>Novel performance</h1><p className="muted">The benchmark is calculated directly from your Catalogue. Import more novels to expand the comparison set.</p></div><button className="primary" onClick={() => { setCreateOpen(v => !v); setCreateError('') }}>{createOpen ? 'Close form' : '+ Add my novel'}</button></div>
+    {createOpen && <div className="panel create-novel-panel">
+      <div className="panel-heading"><div><h2>Add a novel to Catalogue</h2><p>Save your novel and its latest metrics. It will immediately join the Catalogue and benchmark dataset.</p></div></div>
+      <div className="create-novel-grid">
+        <label>Novel title<input value={draftTitle} onChange={e=>setDraftTitle(e.target.value)} placeholder="Novel title" /></label>
+        <label>Royal Road URL<input value={draftUrl} onChange={e=>setDraftUrl(e.target.value)} placeholder="https://www.royalroad.com/fiction/..." /></label>
+        <label>Publication date<input type="date" value={draftPublishedAt} onChange={e=>setDraftPublishedAt(e.target.value)} /></label>
+        <label>Genre<input value={draftGenre} onChange={e=>setDraftGenre(e.target.value)} placeholder="Fantasy, LitRPG…" /></label>
+        <label className="create-tags">Tags<input value={draftTags} onChange={e=>setDraftTags(e.target.value)} placeholder="Comma-separated tags" /></label>
+      </div>
+      <p className="eyebrow create-metrics-label">LATEST METRICS</p>
+      <div className="create-metric-grid">
+        {[
+          ['views','Total views'],['average_views','Average views'],['followers','Followers'],['favorites','Favorites'],
+          ['rating_count','Ratings count'],['rating','Overall rating'],['pages','Pages'],['word_count','Word count'],
+          ['chapters','Chapters'],['overall_score','Overall score'],['style_score','Style score'],['story_score','Story score'],
+          ['grammar_score','Grammar score'],['character_score','Character score']
+        ].map(([key,label])=><label key={key}>{label}<input type="number" min="0" step="any" value={draftMetrics[key] || ''} onChange={e=>setDraftMetrics(old=>({...old,[key]:e.target.value}))} placeholder="—"/></label>)}
+      </div>
+      {createError && <p className="error">{createError}</p>}
+      <div className="create-novel-actions"><span className="muted">Unavailable metrics can be left blank.</span><button className="primary" disabled={createBusy || !draftTitle.trim() || !draftUrl.trim()} onClick={async()=>{
+        setCreateBusy(true); setCreateError('')
+        try {
+          const metrics=Object.fromEntries(Object.entries(draftMetrics).map(([k,v])=>[k,v.trim()===''?null:Number(v)]))
+          if(Object.values(metrics).some(v=>v!==null && (!Number.isFinite(v as number) || (v as number)<0))) throw new Error('Metrics must be non-negative numbers.')
+          if(metrics.rating != null && metrics.rating > 5) throw new Error('Overall rating must be between 0 and 5.')
+          const id=await onCreateNovel({title:draftTitle.trim(),url:draftUrl.trim(),publishedAt:draftPublishedAt,genre:draftGenre.trim(),tags:draftTags,metrics})
+          setSelectedId(id); setCreateOpen(false); setDraftTitle(''); setDraftUrl(''); setDraftPublishedAt(''); setDraftGenre(''); setDraftTags(''); setDraftMetrics({})
+        } catch(error) { setCreateError(error instanceof Error?error.message:'Could not save this novel.') }
+        finally { setCreateBusy(false) }
+      }}>{createBusy?'Saving…':'Save and compare'}</button></div>
+    </div>}
     <div className="stat-grid">
       <div className="stat-card"><div className="stat-top"><span>Benchmark novels</span></div><strong>{fmt(selectedCount)}</strong><small>Catalogue records, excluding your own fiction</small></div>
       <div className="stat-card"><div className="stat-top"><span>Scored novels</span></div><strong>{fmt(withScores)}</strong><small>Have at least one score component</small></div>
