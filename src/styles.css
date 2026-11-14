@@ -26,3 +26,19 @@
 .benchmark-note{margin:12px 0 0;color:#77869b;font-size:11px;line-height:1.6}
 .benchmark-explorer .panel-heading{margin-bottom:14px}
 @media(max-width:760px){.benchmark-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.benchmark-controls label{min-width:100%;}.benchmark-chart{height:270px}.benchmark-position{align-items:flex-start;flex-direction:column}}
+
+/* Benchmark creation and percentile presentation */
+.create-novel-panel{border-color:#3a5147;background:linear-gradient(145deg,#192720,#171f2c)}
+.create-novel-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.create-novel-grid label,.create-metric-grid label{display:grid;gap:6px;color:#9eacbd;font-size:11px}
+.create-novel-grid input,.create-metric-grid input{width:100%;min-width:0;height:39px;padding:0 10px;border:1px solid #344153;border-radius:7px;background:#111925;color:#e8edf3;font:inherit;font-size:12px}
+.create-novel-grid input:focus,.create-metric-grid input:focus{outline:1px solid #83c7a4;border-color:#83c7a4}
+.create-tags{grid-column:1/-1}
+.create-metrics-label{margin:22px 0 10px}
+.create-metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px}
+.create-novel-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:18px}
+.benchmark-percentile{display:grid;grid-template-columns:1fr auto;align-items:center}
+.percentile-score{font:800 27px Manrope,sans-serif;color:#9bd6b1;text-align:right}
+.percentile-score small{display:block;font:500 10px 'DM Sans',sans-serif;color:#8e9aab}
+.percentile-detail{grid-column:1/-1;color:#9eacbd;font-size:11px;border-top:1px solid #2b3948;padding-top:9px}
+@media(max-width:760px){.create-novel-grid{grid-template-columns:1fr}.create-tags{grid-column:auto}.create-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.create-novel-actions{align-items:stretch;flex-direction:column}.benchmark-percentile{grid-template-columns:1fr auto}}
