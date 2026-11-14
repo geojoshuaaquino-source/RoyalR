@@ -59,9 +59,9 @@ const percentileRank = (values: number[], value: number) => values.length ? valu
 const fmt = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? '—' : Intl.NumberFormat('en-US', { notation: Math.abs(value) >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 2 }).format(value)
 const gradeFor = (score: number | null) => score == null ? 'N/A' : score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'E'
 
-export default function BenchmarkExplorer({ novels, latestByNovel }: {
+export default function BenchmarkExplorer({ novels, latestByNovel, onCreateNovel }: {
   novels: UserNovel[]; latestByNovel: Map<string, UserSnapshot>;
-  onCreateNovel?: (input: { title: string; url: string; publishedAt: string; genre: string; tags: string; metrics: Record<string, number | null> }) => Promise<string>
+  onCreateNovel: (input: { title: string; url: string; publishedAt: string; genre: string; tags: string; metrics: Record<string, number | null> }) => Promise<string>
 }) {
   const [genreFilter, setGenreFilter] = useState('All genres')
   const [statusFilter, setStatusFilter] = useState('All statuses')
