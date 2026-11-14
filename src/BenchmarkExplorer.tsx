@@ -55,7 +55,12 @@ const metricValue = (novel: UserNovel, snapshot: UserSnapshot | undefined, key: 
   return null
 }
 const ageOf = (date: string | null) => date && Number.isFinite(new Date(date).getTime()) ? Math.max(0, Math.floor((Date.now() - new Date(date).getTime()) / 86400000)) : null
-const percentileRank = (values: number[], value: number) => values.length ? values.filter(v => v <= value).length / values.length * 100 : null
+const percentileRank = (sortedValues: number[], value: number) => {
+  if (!sortedValues.length) return null
+  let low = 0, high = sortedValues.length
+  while (low < high) { const mid = (low + high) >>> 1; if (sortedValues[mid] <= value) low = mid + 1; else high = mid }
+  return low / sortedValues.length * 100
+}
 const fmt = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? '—' : Intl.NumberFormat('en-US', { notation: Math.abs(value) >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 2 }).format(value)
 const gradeFor = (score: number | null) => score == null ? 'N/A' : score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'E'
 
@@ -87,10 +92,10 @@ export default function BenchmarkExplorer({ novels, latestByNovel, onCreateNovel
     const rows = novels.map(novel => {
       const snapshot = latestByNovel.get(novel.id)
       const values = Object.fromEntries(METRICS.map(m => [m.key, metricValue(novel, snapshot, m.key)])) as Record<MetricKey, number | null>
-      return { novel, snapshot, age: ageOf(novel.published_at), values, score: null as number | null, percentile: null as number | null, coverage: 0, grade: 'N/A' }
+      return { novel, snapshot, age: ageOf(novel.published_at), values, isOwnNovel: isExcludedFromPeerPool(novel), score: null as number | null, percentile: null as number | null, coverage: 0, grade: 'N/A' }
     })
     for (const component of SCORE_WEIGHTS) {
-      const available = rows.filter(r => !isExcludedFromPeerPool(r.novel)).map(r => r.values[component.key]).filter((v): v is number => v != null && Number.isFinite(v))
+      const available = rows.filter(r => !r.isOwnNovel).map(r => r.values[component.key]).filter((v): v is number => v != null && Number.isFinite(v)).sort((a,b)=>a-b)
       for (const row of rows) {
         const value = row.values[component.key]
         if (value == null || !available.length) continue
@@ -108,14 +113,14 @@ export default function BenchmarkExplorer({ novels, latestByNovel, onCreateNovel
       row.score = weight ? (row as any)._weighted / weight : null
       row.grade = gradeFor(row.score)
     }
-    const scoredValues = rows.filter(r => !isExcludedFromPeerPool(r.novel)).map(r => r.score).filter((v): v is number => v != null)
+    const scoredValues = rows.filter(r => !r.isOwnNovel).map(r => r.score).filter((v): v is number => v != null).sort((a,b)=>a-b)
     for (const row of rows) row.percentile = row.score == null ? null : percentileRank(scoredValues, row.score)
     return rows.sort((a,b) => (b.score ?? -1) - (a.score ?? -1))
   }, [novels, latestByNovel])
 
-  const genres = [...new Set(novels.filter(n => !n.fiction_url.includes('/fiction/183032')).flatMap(n => (n.genre || '').split(/[;,]/).map(x => x.trim()).filter(Boolean)))].sort()
-  const tags = [...new Set(novels.filter(n => !n.fiction_url.includes('/fiction/183032')).flatMap(n => n.tags || []))].sort()
-  const statuses = [...new Set(novels.map(n => n.publication_status).filter((x): x is string => !!x))].sort()
+  const genres = useMemo(() => [...new Set(novels.filter(n => !n.fiction_url.includes('/fiction/183032')).flatMap(n => (n.genre || '').split(/[;,]/).map(x => x.trim()).filter(Boolean)))].sort(), [novels])
+  const tags = useMemo(() => [...new Set(novels.filter(n => !n.fiction_url.includes('/fiction/183032')).flatMap(n => n.tags || []))].sort(), [novels])
+  const statuses = useMemo(() => [...new Set(novels.map(n => n.publication_status).filter((x): x is string => !!x))].sort(), [novels])
   const filtered = useMemo(() => scored.filter(row => {
     const n = row.novel
     const genreMatches = genreFilter === 'All genres' || (n.genre || '').split(/[;,]/).map(x => x.trim()).includes(genreFilter)
@@ -126,18 +131,27 @@ export default function BenchmarkExplorer({ novels, latestByNovel, onCreateNovel
     return genreMatches && tagMatches && statusMatches && ageMatches && queryMatches
   }), [scored, genreFilter, tagFilter, statusFilter, ageFilter, search])
   const selected = filtered.find(r => r.novel.id === selectedId) || filtered[0]
-  const metricValues = filtered.map(r => r.values[metricKey]).filter((v): v is number => v != null)
+  const metricValues = filtered.map(r => r.values[metricKey]).filter((v): v is number => v != null).sort((a,b)=>a-b)
   const selectedMetric = selected?.values[metricKey] ?? null
   const metricPct = selectedMetric == null ? null : percentileRank(metricValues, selectedMetric)
   const mean = metricValues.length ? metricValues.reduce((a,b) => a+b,0) / metricValues.length : null
-  const sorted = [...filtered].sort((a,b) => {
+  const sorted = useMemo(() => [...filtered].sort((a,b) => {
     const av = sortBy === 'score' ? a.score : sortBy === 'percentile' ? a.percentile : sortBy === 'followers' ? a.values.followers : a.values.average_views
     const bv = sortBy === 'score' ? b.score : sortBy === 'percentile' ? b.percentile : sortBy === 'followers' ? b.values.followers : b.values.average_views
     return (bv ?? -1) - (av ?? -1)
-  })
-  const chartData = filtered.flatMap(r => r.score == null ? [] : [{ name: r.novel.title, score: Number(r.score.toFixed(2)) }])
-  const scatterData = filtered.flatMap(r => r.values.average_views == null || r.values.followers == null ? [] : [{ x: r.values.average_views, y: r.values.followers, name: r.novel.title }])
-  const selectedCount = scored.filter(r => !r.novel.fiction_url.includes('/fiction/183032') && !r.novel.title.toLowerCase().includes('dungeons in denver')).length
+  }), [filtered, sortBy])
+  const ownNovel = scored.find(r => r.isOwnNovel)
+  const peerRankById = useMemo(() => {
+    const peers = scored.filter(r => !r.isOwnNovel && r.score != null).sort((a,b)=>(b.score ?? -1)-(a.score ?? -1))
+    const ranks = new Map<string, number>()
+    peers.forEach((row,index) => { if (!ranks.has(row.novel.id)) ranks.set(row.novel.id,index+1) })
+    return ranks
+  }, [scored])
+  const pageSize = 50
+  const visibleSorted = sorted.slice(0, pageSize)
+  const chartData = sorted.filter(r => r.score != null).slice(0,40).map(r => ({ name: r.novel.title, score: Number((r.score as number).toFixed(2)) }))
+  const scatterData = filtered.flatMap(r => r.values.average_views == null || r.values.followers == null ? [] : [{ x: r.values.average_views, y: r.values.followers, name: r.novel.title }]).slice(0,250)
+  const selectedCount = scored.filter(r => !r.isOwnNovel).length
   const withScores = scored.filter(r => r.score != null).length
 
   return <div className="benchmark-explorer">
@@ -173,6 +187,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel, onCreateNovel
         finally { setCreateBusy(false) }
       }}>{createBusy?'Saving…':'Save and compare'}</button></div>
     </div>}
+    {ownNovel && <div className="your-novel-card"><div className="your-novel-heading"><span className="your-novel-pill">YOUR NOVEL</span><b>{ownNovel.novel.title}</b></div><div className="your-novel-stats"><div><strong>{ownNovel.score == null ? '—' : ownNovel.score.toFixed(1) + ' / 100'}</strong><small>Composite score · Grade {ownNovel.grade}</small></div><div><strong>{ownNovel.percentile == null ? '—' : ownNovel.percentile.toFixed(1) + 'th'}</strong><small>Overall percentile</small></div><div><strong>{ownNovel.percentile == null ? '—' : `Top ${(100-ownNovel.percentile).toFixed(1)}%`}</strong><small>Relative position among {selectedCount} peers</small></div></div></div>}
     <div className="stat-grid">
       <div className="stat-card"><div className="stat-top"><span>Benchmark novels</span></div><strong>{fmt(selectedCount)}</strong><small>Eligible comparison records; your own fiction is scored separately</small></div>
       <div className="stat-card"><div className="stat-top"><span>Scored novels</span></div><strong>{fmt(withScores)}</strong><small>Have at least one score component</small></div>
@@ -208,7 +223,8 @@ export default function BenchmarkExplorer({ novels, latestByNovel, onCreateNovel
     </div>
     <div className="panel">
       <div className="panel-heading"><div><h2>Novel rankings</h2><p>Every novel receives one composite score and an overall percentile.</p></div><label>Sort by<select value={sortBy} onChange={e=>setSortBy(e.target.value as typeof sortBy)}><option value="score">Performance score</option><option value="percentile">Percentile</option><option value="followers">Followers</option><option value="views">Average views</option></select></label></div>
-      <div className="table-wrap"><table><thead><tr><th>Overall rank</th><th>Novel</th><th>Score / 100</th><th>Grade</th><th>Overall percentile</th><th>Followers</th><th>Avg. views</th><th>Follower ratio</th><th>Coverage</th></tr></thead><tbody>{sorted.map(row=><tr key={row.novel.id} onClick={()=>setSelectedId(row.novel.id)} style={{cursor:'pointer',background:selected?.novel.id===row.novel.id?'#202e39':undefined}}><td>{scored.findIndex(item=>item.novel.id===row.novel.id)+1}</td><td><a className="novel-title" href={row.novel.fiction_url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()}>{row.novel.title}</a><small>{row.novel.author_name || 'Unknown author'}</small></td><td>{row.score == null ? '—' : row.score.toFixed(1)}</td><td>{row.grade}</td><td>{row.percentile == null ? '—' : row.percentile.toFixed(1) + 'th'}</td><td>{fmt(row.values.followers)}</td><td>{fmt(row.values.average_views)}</td><td>{row.values.follow_rate == null ? '—' : row.values.follow_rate.toFixed(2)+'%'}</td><td>{row.coverage} / {SCORE_WEIGHTS.length}</td></tr>)}</tbody></table></div>
+      <div className="table-wrap"><table><thead><tr><th>Overall rank</th><th>Novel</th><th>Score / 100</th><th>Grade</th><th>Overall percentile</th><th>Followers</th><th>Avg. views</th><th>Follower ratio</th><th>Coverage</th></tr></thead><tbody>{visibleSorted.map(row=><tr key={row.novel.id} className={`${row.isOwnNovel ? 'your-novel-row' : ''} ${selected?.novel.id===row.novel.id ? 'selected-novel-row' : ''}`} onClick={()=>setSelectedId(row.novel.id)} style={{cursor:'pointer'}}><td>{row.isOwnNovel ? '—' : (peerRankById.get(row.novel.id) ?? '—')}</td><td><a className="novel-title" href={row.novel.fiction_url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()}>{row.novel.title}</a>{row.isOwnNovel && <span className="your-novel-pill table-own-pill">YOUR NOVEL</span>}<small>{row.novel.author_name || 'Unknown author'}</small></td><td>{row.score == null ? '—' : row.score.toFixed(1)}</td><td>{row.grade}</td><td>{row.percentile == null ? '—' : row.percentile.toFixed(1) + 'th percentile'}</td><td>{fmt(row.values.followers)}</td><td>{fmt(row.values.average_views)}</td><td>{row.values.follow_rate == null ? '—' : row.values.follow_rate.toFixed(2)+'%'}</td><td>{row.coverage} / {SCORE_WEIGHTS.length}</td></tr>)}</tbody></table></div>
+      {sorted.length > pageSize && <div className="benchmark-pagination">Showing {visibleSorted.length} of {sorted.length} novels · capped at 50 rows to keep the page responsive</div>}
       {!sorted.length && <p className="muted">No Catalogue novels match these filters. Import novels or adjust the filters.</p>}
     </div>
   </div>
