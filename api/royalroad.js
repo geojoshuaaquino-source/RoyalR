@@ -51,6 +51,21 @@ function extractMetric(text, labels) {
   return null;
 }
 
+function responseDiagnostics(response, body = "") {
+  const headers = {};
+  for (const name of ["server", "cf-ray", "cf-mitigated", "content-type", "location", "retry-after"]) {
+    const value = response.headers.get(name);
+    if (value) headers[name] = value.slice(0, 200);
+  }
+  const sample = body.slice(0, 12000).toLowerCase();
+  let protection = "none_detected";
+  if (response.headers.get("cf-mitigated") === "challenge") protection = "cloudflare_challenge";
+  else if (sample.includes("anubis") || sample.includes("techaro.lol-anubis-auth")) protection = "anubis_challenge";
+  else if (response.status === 403) protection = "unclassified_403";
+  else if (response.status === 429) protection = "rate_limited";
+  return { protection, headers };
+}
+
 function fictionId(url) {
   return url.match(/\/fiction\/(\d+)/i)?.[1] || null;
 }
@@ -86,13 +101,15 @@ export default async function handler(req, res) {
         redirect: "follow",
         signal: AbortSignal.timeout(9000),
       });
+      const html = await response.text();
       if (response.status === 403 || response.status === 429) {
-        return res.status(200).json({ ok: false, status: response.status, error: response.status === 403
-          ? "Royal Road denied the Latest Updates request (HTTP 403). No access-control bypass is attempted."
+        const diagnostics = responseDiagnostics(response, html);
+        console.info("RoyalR Latest Updates fetch blocked", { status: response.status, ...diagnostics });
+        return res.status(200).json({ ok: false, status: response.status, diagnostics, error: response.status === 403
+          ? "Royal Road denied the Latest Updates request (HTTP 403). See diagnostics for the identified protection layer."
           : "Royal Road rate-limited the Latest Updates request (HTTP 429). Wait before trying again." });
       }
       if (!response.ok) return res.status(200).json({ ok: false, status: response.status, error: "Royal Road returned HTTP " + response.status + " for Latest Updates." });
-      const html = await response.text();
       if (!html || /captcha|verify you are human|access denied/i.test(cleanText(html).slice(0, 1200))) {
         return res.status(200).json({ ok: false, error: "Royal Road did not return a readable Latest Updates page." });
       }
@@ -131,16 +148,18 @@ export default async function handler(req, res) {
       redirect: "follow",
       signal: AbortSignal.timeout(9000),
     });
+    const html = await response.text();
     if (response.status === 403 || response.status === 429) {
+      const diagnostics = responseDiagnostics(response, html);
+      console.info("RoyalR fiction fetch blocked", { status: response.status, url: url.toString(), ...diagnostics });
       return res.status(200).json({
-        ok: false, url: url.toString(), status: response.status,
+        ok: false, url: url.toString(), status: response.status, diagnostics,
         error: response.status === 403
-          ? "Royal Road denied this request (HTTP 403). No access-control bypass is attempted."
+          ? "Royal Road denied this request (HTTP 403). See diagnostics for the identified protection layer."
           : "Royal Road rate-limited this request (HTTP 429). Wait before trying again.",
       });
     }
     if (!response.ok) return res.status(200).json({ ok: false, url: url.toString(), status: response.status, error: "Royal Road returned HTTP " + response.status + "." });
-    const html = await response.text();
     if (!html || /captcha|verify you are human|access denied/i.test(cleanText(html).slice(0, 1200))) {
       return res.status(200).json({ ok: false, url: url.toString(), error: "Royal Road did not return a readable fiction page." });
     }
