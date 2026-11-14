@@ -1,3 +1,6 @@
+import chromium from "@sparticuz/chromium";
+import puppeteer from "puppeteer-core";
+
 const allowedHost = (hostname) => hostname === "royalroad.com" || hostname === "www.royalroad.com";
 
 function decode(value = "") {
@@ -66,6 +69,47 @@ function responseDiagnostics(response, body = "") {
   return { protection, headers };
 }
 
+
+async function fetchRoyalRoadPage(targetUrl) {
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+    });
+    const page = await browser.newPage();
+    page.setDefaultNavigationTimeout(6000);
+    await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
+    const response = await page.goto(targetUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 6000,
+    });
+    if (!response) throw new Error("Chromium received no main-document response.");
+    const headers = response.headers();
+    const html = await page.content();
+    return {
+      status: response.status(),
+      headers: { get: name => headers[String(name).toLowerCase()] || null },
+      html,
+      finalUrl: page.url(),
+    };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
+function isChallengePage(response, html = "") {
+  const sample = html.slice(0, 30000).toLowerCase();
+  return response.headers.get("cf-mitigated") === "challenge" ||
+    sample.includes("challenge-platform") ||
+    sample.includes("cf-chl-") ||
+    sample.includes("techaro.lol-anubis-auth") ||
+    sample.includes("anubis challenge") ||
+    sample.includes("just a moment...");
+}
+
 function fictionId(url) {
   return url.match(/\/fiction\/(\d+)/i)?.[1] || null;
 }
@@ -95,13 +139,8 @@ export default async function handler(req, res) {
     const latestUrl = new URL("https://www.royalroad.com/fictions/latest-updates");
     if (page > 1) latestUrl.searchParams.set("page", String(page));
     try {
-      const response = await fetch(latestUrl.toString(), {
-        method: "GET",
-        headers: { "Accept": "text/html,application/xhtml+xml", "User-Agent": "RoyalRAnalytics/1.0 (user-initiated public page fetch)" },
-        redirect: "follow",
-        signal: AbortSignal.timeout(9000),
-      });
-      const html = await response.text();
+      const response = await fetchRoyalRoadPage(latestUrl.toString());
+      const html = response.html;
       if (response.status === 403 || response.status === 429) {
         const diagnostics = responseDiagnostics(response, html);
         console.info("RoyalR Latest Updates fetch blocked", { status: response.status, ...diagnostics });
@@ -110,6 +149,11 @@ export default async function handler(req, res) {
           : "Royal Road rate-limited the Latest Updates request (HTTP 429). Wait before trying again." });
       }
       if (!response.ok) return res.status(200).json({ ok: false, status: response.status, error: "Royal Road returned HTTP " + response.status + " for Latest Updates." });
+      if (isChallengePage(response, html)) {
+        const diagnostics = responseDiagnostics(response, html);
+        console.info("RoyalR Latest Updates browser challenge detected", { status: response.status, ...diagnostics });
+        return res.status(200).json({ ok: false, status: response.status, diagnostics, error: "Royal Road returned an anti-bot challenge. RoyalR stops here and does not attempt to solve or bypass it." });
+      }
       if (!html || /captcha|verify you are human|access denied/i.test(cleanText(html).slice(0, 1200))) {
         return res.status(200).json({ ok: false, error: "Royal Road did not return a readable Latest Updates page." });
       }
@@ -128,7 +172,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ ok: true, page, source_url: latestUrl.toString(), fictions: [...found.values()] });
     } catch (error) {
-      const message = error?.name === "TimeoutError" ? "Latest Updates did not respond before the 9-second timeout." : "Could not fetch Latest Updates: " + (error?.message || "unknown network error");
+      const message = error?.name === "TimeoutError" ? "Chromium navigation timed out after 6 seconds." : "Could not fetch Latest Updates: " + (error?.message || "unknown network error");
       return res.status(200).json({ ok: false, error: message });
     }
   }
@@ -142,13 +186,8 @@ export default async function handler(req, res) {
   url.search = "";
   url.hash = "";
   try {
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: { "Accept": "text/html,application/xhtml+xml", "User-Agent": "RoyalRAnalytics/1.0 (user-initiated public page fetch)" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(9000),
-    });
-    const html = await response.text();
+    const response = await fetchRoyalRoadPage(url.toString());
+    const html = response.html;
     if (response.status === 403 || response.status === 429) {
       const diagnostics = responseDiagnostics(response, html);
       console.info("RoyalR fiction fetch blocked", { status: response.status, url: url.toString(), ...diagnostics });
@@ -160,6 +199,11 @@ export default async function handler(req, res) {
       });
     }
     if (!response.ok) return res.status(200).json({ ok: false, url: url.toString(), status: response.status, error: "Royal Road returned HTTP " + response.status + "." });
+    if (isChallengePage(response, html)) {
+      const diagnostics = responseDiagnostics(response, html);
+      console.info("RoyalR fiction browser challenge detected", { status: response.status, url: url.toString(), ...diagnostics });
+      return res.status(200).json({ ok: false, url: url.toString(), status: response.status, diagnostics, error: "Royal Road returned an anti-bot challenge. RoyalR stops here and does not attempt to solve or bypass it." });
+    }
     if (!html || /captcha|verify you are human|access denied/i.test(cleanText(html).slice(0, 1200))) {
       return res.status(200).json({ ok: false, url: url.toString(), error: "Royal Road did not return a readable fiction page." });
     }
@@ -197,7 +241,7 @@ export default async function handler(req, res) {
       note: hasMetrics ? null : "The page was readable, but no supported metric fields were detected. Novel metadata can still be saved.",
     });
   } catch (error) {
-    const message = error?.name === "TimeoutError" ? "Royal Road did not respond before the 9-second timeout." : "Could not fetch the Royal Road page: " + (error?.message || "unknown network error");
+    const message = error?.name === "TimeoutError" ? "Chromium navigation timed out after 6 seconds." : "Could not fetch the Royal Road page: " + (error?.message || "unknown network error");
     return res.status(200).json({ ok: false, url: url.toString(), error: message });
   }
 }
