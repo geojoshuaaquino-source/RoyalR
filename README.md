@@ -5,7 +5,7 @@ A personal Royal Road catalogue and monitoring dashboard built with React, TypeS
 ## Current scope
 - Supabase email/password authentication
 - CSV import (up to 500 novels per batch)
-- Manual Royal Road public-page scraper (up to 500 URLs per batch, sequential paced requests)
+- Royal Road Latest Updates URL discovery (page-by-page) plus public fiction-page scraper (up to 500 URLs per batch, sequential paced requests)
 - Scrape run/error logging and timestamped metric snapshots
 - Novel catalogue and watchlist
 - Append-only metric snapshots
@@ -26,4 +26,4 @@ Supported optional columns: `title`, `author`, `published_at`, `genre`, `tags`, 
 The importer accepts at most 500 rows per batch. Rows without metric values still create catalogue entries; snapshots are only created when at least one metric is provided.
 
 ## Data collection
-The manual scraper fetches public Royal Road fiction pages through a Vercel server-side endpoint. It extracts only fields exposed in the returned HTML and leaves unavailable values blank. Requests are sequential and paced. HTTP 403, HTTP 429, CAPTCHA, and other access denials are respected; there is no proxy rotation, session spoofing, or access-control bypass. Royal Road may change its markup or block server-side requests, so scrape completeness is not guaranteed. CSV import remains available as a fallback. Scheduled weekly scraping is not enabled.
+The scraper can extract fiction links from Royal Road's Latest Updates pages, then fetch selected public fiction pages through a Vercel server-side endpoint. You can also paste URLs manually. It extracts only fields exposed in the returned HTML and leaves unavailable values blank. Latest Updates pages are fetched one at a time; fiction-page requests are sequential and paced. HTTP 403, HTTP 429, CAPTCHA, and other access denials are respected; there is no proxy rotation, session spoofing, or access-control bypass. Royal Road may change its markup or block server-side requests, so scrape completeness is not guaranteed. CSV import remains available as a fallback. Scheduled weekly scraping is not enabled.
