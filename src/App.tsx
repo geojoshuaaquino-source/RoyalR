@@ -17,7 +17,7 @@ type Snapshot = {
   id: string; novel_id: string; captured_at: string; views: number | null;
   followers: number | null; favorites: number | null; rating: number | null;
   rating_count: number | null; review_count: number | null; average_views: number | null;
-  chapters: number | null; pages: number | null;
+  chapters: number | null; pages: number | null; raw_data: Record<string, unknown> | null;
 }
 type Tab = 'overview' | 'catalogue' | 'watchlist' | 'import' | 'scrape' | 'statistics'
 type ImportRow = Record<string, unknown>
@@ -80,7 +80,7 @@ export default function App() {
     const uid = session.user.id
     const [n, s, w] = await Promise.all([
       supabase.from('novels').select('id,fiction_url,title,author_name,genre,publication_status,chapter_count,page_count,published_at,tags').eq('user_id', uid).order('updated_at', { ascending: false }),
-      supabase.from('metric_snapshots').select('id,novel_id,captured_at,views,followers,favorites,rating,rating_count,review_count,average_views,chapters,pages').eq('user_id', uid).order('captured_at', { ascending: false }),
+      supabase.from('metric_snapshots').select('id,novel_id,captured_at,views,followers,favorites,rating,rating_count,review_count,average_views,chapters,pages,raw_data').eq('user_id', uid).order('captured_at', { ascending: false }),
       supabase.from('watchlist').select('novel_id').eq('user_id', uid).eq('enabled', true),
     ])
     if (n.error || s.error || w.error) setNotice(n.error?.message || s.error?.message || w.error?.message || 'Could not load data.')
@@ -228,7 +228,17 @@ export default function App() {
           rating: numberValue(row.rating), rating_count: numberValue(row.rating_count), review_count: numberValue(row.review_count),
           average_views: numberValue(row.average_views), chapters: numberValue(row.chapters ?? row.chapter_count), pages: numberValue(row.pages ?? row.page_count),
         }
-        if (metricKeys.some(k => metrics[k] !== null)) snapshotRows.push({ user_id: uid, novel_id: novelId, source_type: 'csv_import', ...metrics })
+        const extendedMetrics = {
+          word_count: numberValue(row.word_count ?? row.wordcount),
+          overall_score: numberValue(row.overall_score ?? row.overallscore),
+          style_score: numberValue(row.style_score ?? row.stylescore),
+          story_score: numberValue(row.story_score ?? row.storyscore),
+          grammar_score: numberValue(row.grammar_score ?? row.grammarscore),
+          character_score: numberValue(row.character_score ?? row.characterscore),
+        }
+        if (metricKeys.some(k => metrics[k] !== null) || Object.values(extendedMetrics).some(v => v !== null)) {
+          snapshotRows.push({ user_id: uid, novel_id: novelId, source_type: 'csv_import', ...metrics, raw_data: { ...row, ...extendedMetrics } })
+        }
         const title = String(row.title || '').toLowerCase()
         if (url.includes('/fiction/183032') || title.includes('dungeons in denver')) exclusionRows.push({ user_id: uid, novel_id: novelId, reason: 'User-owned novel; excluded from benchmark calculations.' })
         if (watchImported) watchRows.push({ user_id: uid, novel_id: novelId, cadence: 'weekly', enabled: true })
