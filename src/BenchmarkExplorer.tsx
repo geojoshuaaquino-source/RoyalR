@@ -186,7 +186,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
   const ownX = selectedNovel ? getUserMetric(selectedNovel, selectedSnapshot, xMetric) : null
   const ownY = selectedNovel ? getUserMetric(selectedNovel, selectedSnapshot, yMetric) : null
   const ownScatter = ownX == null || ownY == null ? [] : [{ x: ownX, y: ownY, name: selectedNovel?.title }]
-  const ageGroups = ['1–90 days','91–180 days','181–270 days','271–360 days','361+ days']
+  const ageGroups = ['0–90 days','91–180 days','181–270 days','271–360 days','361+ days']
   const ageRows = ageGroups.map(group => {
     const peers = categoryFiltered.filter(r => cohort(r.age) === group)
     const f = peers.map(r=>r.f).filter((v):v is number=>v!=null)
