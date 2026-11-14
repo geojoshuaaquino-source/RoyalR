@@ -21,9 +21,9 @@ A personal Royal Road catalogue and monitoring dashboard built with React, TypeS
 ## CSV format
 Required column: `url` (or `fiction_url`).
 
-Supported optional columns: `title`, `author`, `published_at`, `genre`, `tags`, `status`, `chapters`, `pages`, `views`, `followers`, `favorites`, `rating`, `rating_count`, `review_count`, `average_views`.
+Supported optional columns: `title`, `author`, `published_at`, `genre`, `tags`, `status`, `chapters`, `pages`, `views`, `followers`, `favorites`, `rating`, `rating_count`, `review_count`, `average_views`, `word_count`, `overall_score`, `style_score`, `story_score`, `grammar_score`, `character_score`.
 
-The importer accepts at most 500 rows per batch. Rows without metric values still create catalogue entries; snapshots are only created when at least one metric is provided.
+The importer accepts at most 500 rows per batch. Rows without metric values still create catalogue entries; snapshots are only created when at least one supported metric is provided. Extended metrics not represented by dedicated columns are preserved in `metric_snapshots.raw_data`.
 
 ## Data collection
 The scraper can extract fiction links from Royal Road's Latest Updates pages, then fetch selected public fiction pages through a Vercel server-side endpoint. You can also paste URLs manually. It extracts only fields exposed in the returned HTML and leaves unavailable values blank. Latest Updates pages are fetched one at a time; fiction-page requests are sequential and paced. HTTP 403, HTTP 429, CAPTCHA, and other access denials are respected; there is no proxy rotation, session spoofing, or access-control bypass. Royal Road may change its markup or block server-side requests, so scrape completeness is not guaranteed. CSV import remains available as a fallback. Scheduled weekly scraping is not enabled.
