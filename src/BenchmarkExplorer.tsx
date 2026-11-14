@@ -201,7 +201,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
   return <div className="benchmark-explorer">
     <div className="page-heading"><div><p className="eyebrow">FROZEN REFERENCE DATA · AUG 29, 2026</p><h1>Benchmark explorer</h1><p className="muted">Compare a novel against the 410-novel reference dataset. Filter by genre, fiction type, status, age, or metric. Your own novel is shown separately and never added to the benchmark.</p></div></div>
     <div className="stat-grid">
-      <div className="stat-card"><div className="stat-top"><span>Baseline novels</span></div><strong>410</strong><small>Unique fiction records</small></div>
+      <div className="stat-card"><div className="stat-top"><span>Baseline novels</span></div><strong>{baseline.length}</strong><small>Unique fiction records</small></div>
       <div className="stat-card"><div className="stat-top"><span>Baseline median followers</span></div><strong>{fmt(median(baseline.map(r=>r.f).filter((v):v is number=>v!=null)))}</strong><small>Mean: {fmt(summary(baseline.map(r=>r.f).filter((v):v is number=>v!=null)).mean)}</small></div>
       <div className="stat-card"><div className="stat-top"><span>Baseline median avg. views</span></div><strong>{fmt(median(baseline.map(r=>r.av).filter((v):v is number=>v!=null)))}</strong><small>Mean: {fmt(summary(baseline.map(r=>r.av).filter((v):v is number=>v!=null)).mean)}</small></div>
       <div className="stat-card"><div className="stat-top"><span>Age ≤ 30 days</span></div><strong>{baseline.filter(r=>r.age<=30).length}</strong><small>Novel records in this cohort</small></div>
