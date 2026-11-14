@@ -42,3 +42,51 @@
 .percentile-score small{display:block;font:500 10px 'DM Sans',sans-serif;color:#8e9aab}
 .percentile-detail{grid-column:1/-1;color:#9eacbd;font-size:11px;border-top:1px solid #2b3948;padding-top:9px}
 @media(max-width:760px){.create-novel-grid{grid-template-columns:1fr}.create-tags{grid-column:auto}.create-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.create-novel-actions{align-items:stretch;flex-direction:column}.benchmark-percentile{grid-template-columns:1fr auto}}
+
+/* Mobile-first benchmark workspace refinements */
+@media(max-width:760px){
+  .benchmark-explorer{gap:12px}
+  .benchmark-explorer>.page-heading{gap:12px;margin-bottom:4px}
+  .benchmark-explorer>.page-heading>div{min-width:0}
+  .benchmark-explorer>.page-heading .muted{font-size:12px}
+  .benchmark-explorer>.page-heading>.primary{width:100%;min-height:43px}
+  .benchmark-explorer>.panel{padding:12px;border-radius:10px;margin-bottom:0}
+  .benchmark-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:13px}
+  .benchmark-controls label{min-width:0;width:auto;font-size:10px;gap:5px}
+  .benchmark-controls label select{min-width:0;min-height:42px;padding:0 8px;font-size:11px}
+  .benchmark-controls label:last-child:nth-child(odd){grid-column:1/-1}
+  .benchmark-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:8px 0 16px}
+  .benchmark-kpis>div{padding:10px;min-height:68px}
+  .benchmark-kpis span{font-size:10px;line-height:1.35}
+  .benchmark-kpis strong{font-size:17px;margin-top:5px}
+  .benchmark-chart-head{margin:6px 0}
+  .benchmark-chart-head h2{font-size:14px}
+  .benchmark-chart-head .muted{font-size:10px;line-height:1.4}
+  .benchmark-chart{height:235px;margin-top:6px}
+  .benchmark-position{gap:8px;padding:11px;font-size:11px}
+  .benchmark-position>div:first-child{min-width:0;overflow-wrap:anywhere}
+  .percentile-score{font-size:25px}
+  .percentile-detail{font-size:10px}
+  .benchmark-explorer .panel-heading{align-items:flex-start;gap:8px}
+  .benchmark-explorer .panel-heading h2{font-size:14px}
+  .benchmark-explorer .panel-heading p{font-size:10px;line-height:1.45}
+  .benchmark-explorer .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .benchmark-explorer table{min-width:590px}
+  .create-novel-panel .panel-heading{display:block}
+  .create-novel-grid{grid-template-columns:1fr;gap:10px}
+  .create-tags{grid-column:auto}
+  .create-novel-grid input,.create-metric-grid input{min-height:42px;font-size:16px}
+  .create-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+  .create-metric-grid label{font-size:10px;min-width:0}
+  .create-novel-actions{align-items:stretch;flex-direction:column}
+  .create-novel-actions .primary{width:100%;min-height:43px}
+  .create-novel-actions .muted{font-size:10px}
+}
+@media(max-width:380px){
+  .benchmark-controls{grid-template-columns:1fr}
+  .benchmark-controls label:last-child:nth-child(odd){grid-column:auto}
+  .benchmark-chart{height:215px}
+  .create-metric-grid{grid-template-columns:1fr 1fr}
+  .benchmark-kpis>div{padding:9px}
+  .benchmark-kpis strong{font-size:15px}
+}
