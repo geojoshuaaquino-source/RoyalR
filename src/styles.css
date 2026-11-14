@@ -90,3 +90,45 @@
   .benchmark-kpis>div{padding:9px}
   .benchmark-kpis strong{font-size:15px}
 }
+
+
+/* Prevent the benchmark workspace and chart canvases from forcing page overflow. */
+#root,.app-shell,.main-area,.content{min-width:0;max-width:100%}
+.benchmark-explorer{width:100%;max-width:100%;min-width:0;overflow:clip}
+.benchmark-explorer>.page-heading,
+.benchmark-explorer>.panel,
+.benchmark-explorer .panel,
+.benchmark-explorer .benchmark-chart,
+.benchmark-explorer .benchmark-controls,
+.benchmark-explorer .benchmark-kpis{min-width:0;max-width:100%}
+.benchmark-explorer .benchmark-chart{width:100%;overflow:hidden}
+.benchmark-explorer .benchmark-explorer .table-wrap,
+.benchmark-explorer .table-wrap{max-width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain}
+.benchmark-explorer .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.benchmark-explorer .benchmark-controls select{max-width:100%;text-overflow:ellipsis}
+@media(max-width:760px){
+  .content{padding:16px 10px 22px}
+  .benchmark-explorer{gap:10px}
+  .benchmark-explorer>.page-heading{padding:0 2px}
+  .benchmark-explorer>.page-heading h1{font-size:23px;overflow-wrap:anywhere}
+  .benchmark-explorer>.panel{padding:11px 9px}
+  .benchmark-explorer .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .benchmark-explorer .stat-card{padding:10px;min-width:0}
+  .benchmark-explorer .stat-card strong{font-size:18px;overflow-wrap:anywhere}
+  .benchmark-explorer .benchmark-controls{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .benchmark-explorer .benchmark-controls label{min-width:0;width:100%;overflow:hidden}
+  .benchmark-explorer .benchmark-controls select{width:100%;min-width:0;font-size:11px;padding-left:7px;padding-right:5px}
+  .benchmark-explorer .benchmark-chart{height:220px}
+  .benchmark-explorer .benchmark-chart-head>div{min-width:0}
+  .benchmark-explorer .benchmark-chart-head h2{overflow-wrap:anywhere}
+  .benchmark-explorer .benchmark-note{overflow-wrap:anywhere}
+  .benchmark-explorer .panel-heading{min-width:0;flex-wrap:wrap}
+  .benchmark-explorer .benchmark-position{min-width:0}
+}
+@media(max-width:380px){
+  .content{padding-left:8px;padding-right:8px}
+  .benchmark-explorer .benchmark-controls{grid-template-columns:minmax(0,1fr)}
+  .benchmark-explorer .benchmark-chart{height:205px}
+  .benchmark-explorer .stat-grid,
+  .benchmark-explorer .benchmark-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
