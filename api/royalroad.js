@@ -58,6 +58,21 @@ function fictionId(url) {
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   if (req.method !== "POST") return res.status(405).json({ error: "Use POST." });
+  const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  const publishableKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  if (!token || !supabaseUrl || !publishableKey) {
+    return res.status(401).json({ error: "Sign in is required to use the scraper." });
+  }
+  try {
+    const authCheck = await fetch(supabaseUrl.replace(/\\/$/, "") + "/auth/v1/user", {
+      headers: { "apikey": publishableKey, "Authorization": "Bearer " + token },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!authCheck.ok) return res.status(401).json({ error: "Your session is invalid or expired. Sign in again." });
+  } catch {
+    return res.status(503).json({ error: "Could not verify your session with Supabase." });
+  }
   const rawUrl = typeof req.body?.url === "string" ? req.body.url : "";
   let url;
   try { url = new URL(rawUrl); } catch { return res.status(400).json({ error: "Invalid URL." }); }
