@@ -132,3 +132,21 @@
   .benchmark-explorer .stat-grid,
   .benchmark-explorer .benchmark-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+
+/* Own-novel identification and lightweight benchmark browsing */
+.your-novel-card{padding:15px 16px;border:1px solid #54856a;border-left:4px solid #8fd2a9;border-radius:10px;background:linear-gradient(110deg,#1d3329,#18232b);display:grid;gap:12px}
+.your-novel-heading{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap}
+.your-novel-heading>b{color:#edf7f0;font:700 14px Manrope,sans-serif;overflow-wrap:anywhere}
+.your-novel-pill{display:inline-flex;align-items:center;padding:4px 7px;border:1px solid #6ca783;border-radius:5px;background:#294b39;color:#b8e7c8;font-size:9px;font-weight:800;letter-spacing:.65px;white-space:nowrap}
+.your-novel-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.your-novel-stats>div{min-width:0}
+.your-novel-stats strong{display:block;color:#a9dfba;font:800 22px Manrope,sans-serif;overflow-wrap:anywhere}
+.your-novel-stats small{display:block;margin-top:3px;color:#9aab9f;font-size:10px;line-height:1.4}
+.your-novel-row td{background:#1c3028!important;border-top:1px solid #4c795f;border-bottom:1px solid #4c795f;color:#e6f3e9}
+.your-novel-row td:first-child{border-left:3px solid #8fd2a9}
+.your-novel-row .novel-title{color:#b9e8c8}
+.table-own-pill{margin-top:5px}
+.selected-novel-row td{box-shadow:inset 0 1px #769b86,inset 0 -1px #769b86}
+.benchmark-pagination{padding-top:11px;color:#8796a8;font-size:10px}
+@media(max-width:600px){.your-novel-card{padding:12px;gap:10px}.your-novel-stats{gap:7px}.your-novel-stats strong{font-size:18px}.your-novel-stats small{font-size:9px}}
