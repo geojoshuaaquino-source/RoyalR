@@ -110,53 +110,6 @@ export default function App() {
   ), [novels])
 
   const latestMetrics = useMemo(() => benchmarkNovels.map(n => latestByNovel.get(n.id)).filter(Boolean) as Snapshot[], [benchmarkNovels, latestByNovel])
-  const growthRows = useMemo(() => benchmarkNovels.flatMap(n => {
-    const latest = latestByNovel.get(n.id)
-    const previous = previousByNovel.get(n.id)
-    if (!latest || !previous) return []
-    return [{
-      novel: n,
-      latest,
-      previous,
-      followerChange: latest.followers !== null && previous.followers !== null ? latest.followers - previous.followers : null,
-      viewChange: latest.views !== null && previous.views !== null ? latest.views - previous.views : null,
-    }]
-  }), [benchmarkNovels, latestByNovel, previousByNovel])
-  const ageAdjustedRows = useMemo(() => {
-    const rows = benchmarkNovels.flatMap(n => {
-      const snapshot = latestByNovel.get(n.id)
-      if (!snapshot) return []
-      const publishedTime = n.published_at ? new Date(n.published_at).getTime() : NaN
-      const ageDays = Number.isFinite(publishedTime) ? Math.floor((Date.now() - publishedTime) / 86400000) : null
-      return [{
-        novel: n,
-        snapshot,
-        ageDays,
-        cohort: ageBand(ageDays),
-        conversion: snapshot.average_views && snapshot.average_views > 0 && snapshot.followers !== null
-          ? snapshot.followers / snapshot.average_views
-          : null,
-      }]
-    })
-    return rows.map(row => {
-      const peers = rows.filter(peer => peer.cohort === row.cohort)
-      const atOrBelow = peers.filter(peer => (peer.snapshot.followers || 0) <= (row.snapshot.followers || 0)).length
-      return { ...row, percentile: peers.length ? Math.round((atOrBelow / peers.length) * 100) : null }
-    })
-  }, [benchmarkNovels, latestByNovel])
-  const cohortStats = useMemo(() => {
-    const bands = ['1–30 days', '31–90 days', '91–180 days', '181–365 days', '366+ days', 'Unknown']
-    return bands.map(cohort => {
-      const rows = ageAdjustedRows.filter(row => row.cohort === cohort)
-      return {
-        cohort,
-        count: rows.length,
-        followers: median(rows.map(row => row.snapshot.followers).filter((v): v is number => v !== null)),
-        averageViews: median(rows.map(row => row.snapshot.average_views).filter((v): v is number => v !== null)),
-        conversion: median(rows.map(row => row.conversion).filter((v): v is number => v !== null)),
-      }
-    }).filter(row => row.count > 0)
-  }, [ageAdjustedRows])
   const totals = useMemo(() => ({
     views: latestMetrics.reduce((a, s) => a + (s.views || 0), 0),
     followers: latestMetrics.reduce((a, s) => a + (s.followers || 0), 0),
