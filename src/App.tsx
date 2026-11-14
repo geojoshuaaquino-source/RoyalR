@@ -168,16 +168,53 @@ export default function App() {
   }
   async function signOut() { await supabase.auth.signOut(); setNovels([]); setSnapshots([]); setWatchIds([]) }
 
+  function normalizeImportRows(rows: ImportRow[]) {
+    const aliases: Record<string,string> = {
+      source_url:'url', fiction_url:'url', royalroad_url:'url', total_views:'views',
+      ratings_count:'rating_count', chapter_count:'chapters', page_count:'pages',
+      wordcount:'word_count', overallscore:'overall_score', stylescore:'style_score',
+      storyscore:'story_score', grammarscore:'grammar_score', characterscore:'character_score',
+      authorname:'author', publishedat:'published_at'
+    }
+    return rows.map(source => {
+      const row: ImportRow = {...source}
+      for (const [from,to] of Object.entries(aliases)) if (row[to] == null && row[from] != null) row[to] = row[from]
+      return row
+    })
+  }
+
   function chooseFile(next: File | null) {
     setFile(next); setPreview([]); setImportError('')
     if (!next) return
+    const isJson = next.name.toLowerCase().endsWith('.json') || next.type.includes('json')
+    if (isJson) {
+      const reader = new FileReader()
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(String(reader.result || ''))
+          const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.novels) ? parsed.novels : Array.isArray(parsed?.data) ? parsed.data : Array.isArray(parsed?.records) ? parsed.records : null
+          if (!rows) throw new Error('JSON must contain an array of novels, or a novels/data/records array.')
+          if (rows.length > 500) throw new Error(`This batch has ${rows.length} rows. The limit is 500 per import.`)
+          const normalized = normalizeImportRows(rows as ImportRow[])
+          if (!normalized.some(row => row.url || row.fiction_url || row.source_url)) throw new Error('JSON records need a url, fiction_url, or source_url field.')
+          setPreview(normalized)
+        } catch (error) { setImportError(error instanceof Error ? error.message : 'Could not read this JSON file.') }
+      }
+      reader.onerror = () => setImportError('Could not read this file.')
+      reader.readAsText(next)
+      return
+    }
     Papa.parse<ImportRow>(next, {
-      header: true, skipEmptyLines: true, transformHeader: h => h.trim().toLowerCase().replace(/[ -]+/g, '_'),
+      header: true, skipEmptyLines: true,
+      transformHeader: h => h.trim().replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().replace(/[ -]+/g, '_'),
       complete: result => {
         if (result.errors.length) setImportError(result.errors[0].message)
         else if (result.data.length > 500) setImportError(`This batch has ${result.data.length} rows. The limit is 500 per import.`)
-        else if (!result.meta.fields?.some(k => ['url','fiction_url'].includes(k))) setImportError('CSV needs a url or fiction_url column.')
-        else setPreview(result.data)
+        else {
+          const normalized = normalizeImportRows(result.data)
+          if (!normalized.some(row => row.url || row.fiction_url || row.source_url)) setImportError('CSV needs a url, fiction_url, or source_url column. Royal Road scraper exports with sourceUrl are supported.')
+          else setPreview(normalized)
+        }
       },
       error: err => setImportError(err.message),
     })
@@ -187,7 +224,7 @@ export default function App() {
     if (!session?.user?.id || !preview.length) return
     setImportBusy(true); setImportError(''); setNotice('')
     const uid = session.user.id
-    const runResult = await supabase.from('ingestion_runs').insert({ user_id: uid, source_type: 'csv_import', source_label: file?.name || 'CSV upload' }).select('id').single()
+    const runResult = await supabase.from('ingestion_runs').insert({ user_id: uid, source_type: 'file_import', source_label: file?.name || 'File upload' }).select('id').single()
     if (runResult.error) { setImportError(runResult.error.message); setImportBusy(false); return }
     const runId = runResult.data.id
     let created = 0, updated = 0, skipped = 0, failures = 0
@@ -196,7 +233,7 @@ export default function App() {
     const sourceRows: { row: ImportRow; url: string }[] = []
     const seenUrls = new Set<string>()
     preview.forEach((row, i) => {
-      const url = urlValue(row.url ?? row.fiction_url)
+      const url = urlValue(row.url ?? row.fiction_url ?? row.source_url)
       if (!url) { skipped++; errors.push({ user_id: uid, run_id: runId, row_number: i + 2, fiction_url: null, error_code: 'INVALID_URL', error_message: 'Missing or invalid Royal Road fiction URL.', raw_row: row }); return }
       if (seenUrls.has(url)) { skipped++; errors.push({ user_id: uid, run_id: runId, row_number: i + 2, fiction_url: url, error_code: 'DUPLICATE_URL', error_message: 'Duplicate URL within this CSV batch; first occurrence was kept.', raw_row: row }); return }
       seenUrls.add(url)
@@ -224,8 +261,8 @@ export default function App() {
         const novelId = idByUrl.get(url)
         if (!novelId) return
         const metrics: Record<string, number | null> = {
-          views: numberValue(row.views), followers: numberValue(row.followers), favorites: numberValue(row.favorites),
-          rating: numberValue(row.rating), rating_count: numberValue(row.rating_count), review_count: numberValue(row.review_count),
+          views: numberValue(row.views ?? row.total_views), followers: numberValue(row.followers), favorites: numberValue(row.favorites),
+          rating: numberValue(row.rating), rating_count: numberValue(row.rating_count ?? row.ratings_count), review_count: numberValue(row.review_count),
           average_views: numberValue(row.average_views), chapters: numberValue(row.chapters ?? row.chapter_count), pages: numberValue(row.pages ?? row.page_count),
         }
         const extendedMetrics = {
@@ -237,7 +274,7 @@ export default function App() {
           character_score: numberValue(row.character_score ?? row.characterscore),
         }
         if (metricKeys.some(k => metrics[k] !== null) || Object.values(extendedMetrics).some(v => v !== null)) {
-          snapshotRows.push({ user_id: uid, novel_id: novelId, source_type: 'csv_import', ...metrics, raw_data: { ...row, ...extendedMetrics } })
+          snapshotRows.push({ user_id: uid, novel_id: novelId, source_type: 'file_import', ...metrics, raw_data: { ...row, ...extendedMetrics } })
         }
         const title = String(row.title || '').toLowerCase()
         if (url.includes('/fiction/183032') || title.includes('dungeons in denver')) exclusionRows.push({ user_id: uid, novel_id: novelId, reason: 'User-owned novel; excluded from benchmark calculations.' })
@@ -393,6 +430,39 @@ export default function App() {
     if (novelsFound.length) setTab('catalogue')
   }
 
+  async function createNovelFromBenchmark(input: { title: string; url: string; publishedAt: string; genre: string; tags: string; metrics: Record<string, number | null> }) {
+    if (!session?.user?.id) throw new Error('You must be signed in to create a novel.')
+    const url = urlValue(input.url)
+    if (!url) throw new Error('Enter a valid Royal Road fiction URL.')
+    const uid = session.user.id
+    const saved = await supabase.from('novels').upsert({
+      user_id: uid, fiction_url: url, title: input.title,
+      published_at: input.publishedAt || null, genre: input.genre || null,
+      tags: input.tags.split(/[;,]/).map(x=>x.trim()).filter(Boolean),
+      last_seen_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,fiction_url' }).select('id').single()
+    if (saved.error) throw saved.error
+    const m = input.metrics
+    const snapshot = {
+      user_id: uid, novel_id: saved.data.id, source_type: 'manual',
+      views: m.views ?? null, average_views: m.average_views ?? null,
+      followers: m.followers ?? null, favorites: m.favorites ?? null,
+      rating_count: m.rating_count ?? null, rating: m.rating ?? null,
+      pages: m.pages ?? null, chapters: m.chapters ?? null,
+      raw_data: {
+        word_count: m.word_count ?? null, overall_score: m.overall_score ?? null,
+        style_score: m.style_score ?? null, story_score: m.story_score ?? null,
+        grammar_score: m.grammar_score ?? null, character_score: m.character_score ?? null,
+      },
+    }
+    if (Object.values(m).some(value => value != null)) {
+      const inserted = await supabase.from('metric_snapshots').insert(snapshot)
+      if (inserted.error) throw inserted.error
+    }
+    await loadData()
+    return saved.data.id as string
+  }
+
   async function toggleWatch(novelId: string) {
     if (!session?.user?.id) return
     const isWatching = watchIds.includes(novelId)
@@ -420,7 +490,7 @@ export default function App() {
     { id: 'overview', label: 'Overview', icon: ChartNoAxesCombined },
     { id: 'catalogue', label: 'Catalogue', icon: BookOpen },
     { id: 'watchlist', label: 'Watchlist', icon: Eye },
-    { id: 'import', label: 'CSV import', icon: CloudUpload },
+    { id: 'import', label: 'File import', icon: CloudUpload },
     { id: 'scrape', label: 'Royal Road scraper', icon: Globe },
     { id: 'statistics', label: 'Benchmark explorer', icon: Activity },
   ]
@@ -457,14 +527,14 @@ export default function App() {
           <div className="panel"><NovelTable novels={rows} latest={latestByNovel} watchIds={watchIds} onWatch={toggleWatch}/>{!rows.length && <Empty title={tab === 'watchlist' ? 'Nothing monitored yet' : 'No novels found'} text="Import novels, then add the ones you want to monitor to your watchlist." action="Import novels" onClick={() => setTab('import')}/>}</div>
         </>}
         {tab === 'import' && <>
-          <div className="page-heading"><div><p className="eyebrow">DATA INGESTION</p><h1>Import novels</h1><p className="muted">Upload a CSV export. Each batch supports up to 500 novels.</p></div></div>
+          <div className="page-heading"><div><p className="eyebrow">DATA INGESTION</p><h1>Import novels</h1><p className="muted">Upload a CSV or JSON export. Each batch supports up to 500 novels.</p></div></div>
           <div className="import-layout"><div className="panel import-panel">
-            <h2>Upload CSV</h2><p className="muted">Required: <code>url</code> or <code>fiction_url</code>. Other fields are optional.</p>
-            <label className="dropzone"><CloudUpload size={28}/><b>{file ? file.name : 'Choose a CSV file'}</b><span>{file ? `${preview.length} rows detected` : 'Select a file from your device'}</span><input type="file" accept=".csv,text/csv" onChange={e => chooseFile(e.target.files?.[0] || null)}/></label>
+            <h2>Upload CSV or JSON</h2><p className="muted">Required: <code>url</code> or <code>fiction_url</code>. Other fields are optional.</p>
+            <label className="dropzone"><CloudUpload size={28}/><b>{file ? file.name : 'Choose a CSV or JSON file'}</b><span>{file ? `${preview.length} rows detected` : 'Select a file from your device'}</span><input type="file" accept=".csv,.json,text/csv,application/json" onChange={e => chooseFile(e.target.files?.[0] || null)}/></label>
             <label className="check-row"><input type="checkbox" checked={watchImported} onChange={e => setWatchImported(e.target.checked)}/> Add imported novels to weekly watchlist</label>
             {importError && <p className="error">{importError}</p>}
             <button className="primary full" disabled={!preview.length || importBusy || !!importError} onClick={() => void runImport()}>{importBusy ? 'Importing…' : `Import ${preview.length || 0} novels`}</button>
-          </div><div className="panel"><h2>Supported columns</h2><div className="field-list">{['url (required)','title','author','published_at','genre','tags','status','chapters','pages','views','followers','favorites','rating','rating_count','review_count','average_views','word_count','overall_score','style_score','story_score','grammar_score','character_score'].map(x => <code key={x}>{x}</code>)}</div><div className="info-strip compact"><ShieldCheck size={16}/><span>CSV imports are stored under your account. Snapshots are preserved as history, not overwritten.</span></div></div></div>
+          </div><div className="panel"><h2>Supported columns</h2><div className="field-list">{['url (required)','title','author','published_at','genre','tags','status','chapters','pages','views','followers','favorites','rating','rating_count','review_count','average_views','word_count','overall_score','style_score','story_score','grammar_score','character_score'].map(x => <code key={x}>{x}</code>)}</div><div className="info-strip compact"><ShieldCheck size={16}/><span>File imports are stored under your account. Snapshots are preserved as history, not overwritten.</span></div></div></div>
           {preview.length > 0 && <div className="panel preview-panel"><div className="panel-heading"><div><h2>Import preview</h2><p>Showing the first five rows.</p></div><span className="pill">{preview.length} rows</span></div><div className="table-wrap"><table><thead><tr><th>Title</th><th>Author</th><th>Views</th><th>Followers</th><th>Rating</th></tr></thead><tbody>{preview.slice(0,5).map((r,i)=><tr key={i}><td>{String(r.title || r.url || r.fiction_url || '—')}</td><td>{String(r.author || '—')}</td><td>{fmt(numberValue(r.views))}</td><td>{fmt(numberValue(r.followers))}</td><td>{fmt(numberValue(r.rating))}</td></tr>)}</tbody></table></div></div>}
         </>}
         {tab === 'scrape' && <>
@@ -493,7 +563,7 @@ export default function App() {
               </div>
               <label className="check-row"><input type="checkbox" checked={watchScraped} onChange={e => setWatchScraped(e.target.checked)} disabled={scrapeBusy}/> Add successfully collected novels to weekly watchlist</label>
               {scrapeBusy && <div className="scrape-progress"><div><span>Processing queue</span><b>{scrapeProgress.done} / {scrapeProgress.total}</b></div><div className="progress-track"><i style={{ width: (scrapeProgress.total ? scrapeProgress.done / scrapeProgress.total * 100 : 0) + '%' }}/></div></div>}
-              {importError && <div className="scrape-alert"><strong>Collection could not continue</strong><p>{importError}</p>{/403|429|denied|blocked/i.test(importError) && <p>Royal Road is refusing server-side access. This tool will not bypass that restriction. You can still import data you collect manually using the CSV importer.</p>}</div>}
+              {importError && <div className="scrape-alert"><strong>Collection could not continue</strong><p>{importError}</p>{/403|429|denied|blocked/i.test(importError) && <p>Royal Road is refusing server-side access. This tool will not bypass that restriction. You can still import data you collect manually using the CSV / JSON importer.</p>}</div>}
             </section>
             <aside className="scrape-side">
               <div className="panel">
@@ -506,12 +576,12 @@ export default function App() {
               </div>
               <div className="panel">
                 <h2>Manual data import</h2><p className="muted">If Royal Road blocks collection, use the existing CSV importer with data you have gathered yourself.</p>
-                <button className="secondary full" onClick={() => { setTab('import'); setImportError(''); }}>Open CSV importer <ChevronRight size={15}/></button>
+                <button className="secondary full" onClick={() => { setTab('import'); setImportError(''); }}>Open file importer <ChevronRight size={15}/></button>
               </div>
             </aside>
           </div>
         </>}
-        {tab === 'statistics' && <Suspense fallback={<div className="panel"><p className="muted">Loading benchmark explorer…</p></div>}><BenchmarkExplorer novels={novels} latestByNovel={latestByNovel} /></Suspense>}
+        {tab === 'statistics' && <Suspense fallback={<div className="panel"><p className="muted">Loading benchmark explorer…</p></div>}><BenchmarkExplorer novels={novels} latestByNovel={latestByNovel} onCreateNovel={createNovelFromBenchmark} /></Suspense>}
         {loading && <div className="loading-line"><RefreshCw size={14}/> Syncing data…</div>}
         <footer>Royal Road Analytics <span>·</span> Private analytics workspace <span>·</span> Data source: user-provided imports</footer>
       </div>
