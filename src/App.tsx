@@ -262,7 +262,7 @@ export default function App() {
         if (!novelId) return
         const metrics: Record<string, number | null> = {
           views: numberValue(row.views ?? row.total_views), followers: numberValue(row.followers), favorites: numberValue(row.favorites),
-          rating: numberValue(row.rating), rating_count: numberValue(row.rating_count ?? row.ratings_count), review_count: numberValue(row.review_count),
+          rating: numberValue(row.rating ?? row.overall_score ?? row.overallscore), rating_count: numberValue(row.rating_count ?? row.ratings_count), review_count: numberValue(row.review_count),
           average_views: numberValue(row.average_views), chapters: numberValue(row.chapters ?? row.chapter_count), pages: numberValue(row.pages ?? row.page_count),
         }
         const extendedMetrics = {
@@ -447,7 +447,7 @@ export default function App() {
       user_id: uid, novel_id: saved.data.id, source_type: 'manual',
       views: m.views ?? null, average_views: m.average_views ?? null,
       followers: m.followers ?? null, favorites: m.favorites ?? null,
-      rating_count: m.rating_count ?? null, rating: m.rating ?? null,
+      rating_count: m.rating_count ?? null, rating: m.rating ?? m.overall_score ?? null,
       pages: m.pages ?? null, chapters: m.chapters ?? null,
       raw_data: {
         word_count: m.word_count ?? null, overall_score: m.overall_score ?? null,
