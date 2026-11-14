@@ -186,9 +186,16 @@ export default function App() {
     })
   }
 
+  const MAX_IMPORT_BYTES = 25 * 1024 * 1024
+  const MAX_IMPORT_ROWS = 10000
+
   function chooseFile(next: File | null) {
     setFile(next); setPreview([]); setImportError('')
     if (!next) return
+    if (next.size > MAX_IMPORT_BYTES) {
+      setImportError('This file is ' + (next.size / 1024 / 1024).toFixed(1) + ' MB. The current limit is 25 MB.')
+      return
+    }
     const isJson = next.name.toLowerCase().endsWith('.json') || next.type.includes('json')
     if (isJson) {
       const reader = new FileReader()
@@ -197,7 +204,7 @@ export default function App() {
           const parsed = JSON.parse(String(reader.result || ''))
           const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.novels) ? parsed.novels : Array.isArray(parsed?.data) ? parsed.data : Array.isArray(parsed?.records) ? parsed.records : null
           if (!rows) throw new Error('JSON must contain an array of novels, or a novels/data/records array.')
-          if (rows.length > 500) throw new Error(`This batch has ${rows.length} rows. The limit is 500 per import.`)
+          if (rows.length > MAX_IMPORT_ROWS) throw new Error('This file contains ' + rows.length.toLocaleString() + ' rows. The current limit is ' + MAX_IMPORT_ROWS.toLocaleString() + '.')
           const normalized = normalizeImportRows(rows as ImportRow[])
           if (!normalized.some(row => row.url || row.fiction_url || row.source_url)) throw new Error('JSON records need a url, fiction_url, or source_url field.')
           setPreview(normalized)
@@ -212,7 +219,7 @@ export default function App() {
       transformHeader: h => h.trim().replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().replace(/[ -]+/g, '_'),
       complete: result => {
         if (result.errors.length) setImportError(result.errors[0].message)
-        else if (result.data.length > 500) setImportError(`This batch has ${result.data.length} rows. The limit is 500 per import.`)
+        else if (result.data.length > MAX_IMPORT_ROWS) setImportError('This file contains ' + result.data.length.toLocaleString() + ' rows. The current limit is ' + MAX_IMPORT_ROWS.toLocaleString() + '.')
         else {
           const normalized = normalizeImportRows(result.data)
           if (!normalized.some(row => row.url || row.fiction_url || row.source_url)) setImportError('CSV needs a url, fiction_url, or source_url column. Royal Road scraper exports with sourceUrl are supported.')
@@ -230,79 +237,122 @@ export default function App() {
     const runResult = await supabase.from('ingestion_runs').insert({ user_id: uid, source_type: 'file_import', source_label: file?.name || 'File upload' }).select('id').single()
     if (runResult.error) { setImportError(runResult.error.message); setImportBusy(false); return }
     const runId = runResult.data.id
-    let created = 0, updated = 0, skipped = 0, failures = 0
+    let created = 0, updated = 0, skipped = 0, failures = 0, snapshotsSaved = 0
     const errors: { user_id: string; run_id: string; row_number: number; fiction_url: string | null; error_code: string; error_message: string; raw_row: ImportRow }[] = []
-    const records: any[] = []
-    const sourceRows: { row: ImportRow; url: string }[] = []
+    const sourceRows: { row: ImportRow; url: string; rowNumber: number }[] = []
     const seenUrls = new Set<string>()
+
     preview.forEach((row, i) => {
       const url = urlValue(row.url ?? row.fiction_url ?? row.source_url)
-      if (!url) { skipped++; errors.push({ user_id: uid, run_id: runId, row_number: i + 2, fiction_url: null, error_code: 'INVALID_URL', error_message: 'Missing or invalid Royal Road fiction URL.', raw_row: row }); return }
-      if (seenUrls.has(url)) { skipped++; errors.push({ user_id: uid, run_id: runId, row_number: i + 2, fiction_url: url, error_code: 'DUPLICATE_URL', error_message: 'Duplicate URL within this CSV batch; first occurrence was kept.', raw_row: row }); return }
+      if (!url) { skipped++; errors.push({ user_id: uid, run_id: runId, row_number: i + 2, fiction_url: null, error_code: 'INVALID_URL', error_message: 'Missing or invalid Royal Road fiction URL.', raw_row: {} }); return }
+      if (seenUrls.has(url)) { skipped++; errors.push({ user_id: uid, run_id: runId, row_number: i + 2, fiction_url: url, error_code: 'DUPLICATE_URL', error_message: 'Duplicate URL within this file; first occurrence was kept.', raw_row: {} }); return }
       seenUrls.add(url)
-      const title = textValue(row.title) || url.split('/').filter(Boolean).pop()?.replace(/-/g, ' ') || 'Untitled novel'
-      const rawTags = row.tags ?? row.latest_updates_tags
-      const tags = Array.isArray(rawTags) ? rawTags.map(x => String(x).trim()).filter(Boolean) : textValue(rawTags)?.split(/[;,]/).map(x => x.trim()).filter(Boolean) || []
-      const chapterTotal = Array.isArray(row.chapters) ? row.chapters.length : row.chapters
-      records.push({ user_id: uid, fiction_url: url, title, author_name: textValue(row.author ?? row.author_name), published_at: textValue(row.published_at ?? row.first_published_at), genre: textValue(row.genre ?? row.genres), tags, publication_status: textValue(row.status ?? row.publication_status ?? row.latest_updates_status), chapter_count: numberValue(row.chapter_count ?? chapterTotal), page_count: numberValue(row.pages ?? row.page_count), last_seen_at: new Date().toISOString() })
-      sourceRows.push({ row, url })
+      sourceRows.push({ row, url, rowNumber: i + 2 })
     })
+
+    const chunks = <T,>(items: T[], size: number) => {
+      const result: T[][] = []
+      for (let i = 0; i < items.length; i += size) result.push(items.slice(i, i + size))
+      return result
+    }
+
     try {
-      const existing = await supabase.from('novels').select('id,fiction_url').eq('user_id', uid).in('fiction_url', records.map(x => x.fiction_url))
-      if (existing.error) throw existing.error
-      const existed = new Set((existing.data || []).map(x => x.fiction_url))
-      for (const r of records) existed.has(r.fiction_url) ? updated++ : created++
-      if (records.length) {
+      // Keep database requests small. This avoids sending a large file as one PostgREST payload.
+      for (const batch of chunks(sourceRows, 100)) {
+        const records = batch.map(({ row, url }) => {
+          const rawTags = row.tags ?? row.latest_updates_tags
+          const tags = Array.isArray(rawTags) ? rawTags.map(x => String(x).trim()).filter(Boolean) : textValue(rawTags)?.split(/[;,]/).map(x => x.trim()).filter(Boolean) || []
+          const chapterTotal = Array.isArray(row.chapters) ? row.chapters.length : row.chapters
+          const title = textValue(row.title) || url.split('/').filter(Boolean).pop()?.replace(/-/g, ' ') || 'Untitled novel'
+          return {
+            user_id: uid, fiction_url: url, title,
+            author_name: textValue(row.author ?? row.author_name),
+            published_at: textValue(row.published_at ?? row.first_published_at),
+            genre: textValue(row.genre ?? row.genres), tags,
+            publication_status: textValue(row.status ?? row.publication_status ?? row.latest_updates_status),
+            chapter_count: numberValue(row.chapter_count ?? chapterTotal),
+            page_count: numberValue(row.pages ?? row.page_count),
+            last_seen_at: new Date().toISOString(),
+          }
+        })
+        const existing = await supabase.from('novels').select('id,fiction_url').eq('user_id', uid).in('fiction_url', batch.map(x => x.url))
+        if (existing.error) throw existing.error
+        const existed = new Set((existing.data || []).map(x => x.fiction_url))
+        records.forEach(r => existed.has(r.fiction_url) ? updated++ : created++)
         const upsert = await supabase.from('novels').upsert(records, { onConflict: 'user_id,fiction_url' })
         if (upsert.error) throw upsert.error
+
+        const saved = await supabase.from('novels').select('id,fiction_url').eq('user_id', uid).in('fiction_url', batch.map(x => x.url))
+        if (saved.error) throw saved.error
+        const idByUrl = new Map((saved.data || []).map(x => [x.fiction_url, x.id]))
+        const snapshotRows: any[] = []
+        const exclusionRows: any[] = []
+        const watchRows: any[] = []
+
+        batch.forEach(({ row, url }) => {
+          const novelId = idByUrl.get(url)
+          if (!novelId) return
+          const metrics: Record<string, number | null> = {
+            views: numberValue(row.views ?? row.total_views), followers: numberValue(row.followers),
+            favorites: numberValue(row.favorites), rating: numberValue(row.rating ?? row.overall_rating ?? row.overall_score ?? row.overallscore),
+            rating_count: numberValue(row.rating_count ?? row.ratings_count), review_count: numberValue(row.review_count),
+            average_views: numberValue(row.average_views),
+            chapters: numberValue(row.chapter_count ?? (Array.isArray(row.chapters) ? row.chapters.length : row.chapters)),
+            pages: numberValue(row.pages ?? row.page_count),
+          }
+          const extendedMetrics = {
+            word_count: numberValue(row.word_count ?? row.words ?? row.wordcount),
+            overall_score: numberValue(row.overall_score ?? row.overall_rating ?? row.overallscore),
+            style_score: numberValue(row.style_score ?? row.style_rating ?? row.stylescore),
+            story_score: numberValue(row.story_score ?? row.story_rating ?? row.storyscore),
+            grammar_score: numberValue(row.grammar_score ?? row.grammar_rating ?? row.grammarscore),
+            character_score: numberValue(row.character_score ?? row.character_rating ?? row.characterscore),
+          }
+          if (metricKeys.some(k => metrics[k] !== null) || Object.values(extendedMetrics).some(v => v !== null)) {
+            // Chapter arrays and long descriptions can dominate a JSON export; the app only needs their count.
+            const { chapters: _chapters, description: _description, ...compactRawRow } = row
+            snapshotRows.push({ user_id: uid, novel_id: novelId, source_type: 'file_import', ...metrics, raw_data: { ...compactRawRow, ...extendedMetrics } })
+          }
+          const title = String(row.title || '').toLowerCase()
+          if (url.includes('/fiction/183032') || title.includes('dungeons in denver')) exclusionRows.push({ user_id: uid, novel_id: novelId, reason: 'User-owned novel; excluded from benchmark calculations.' })
+          if (watchImported) watchRows.push({ user_id: uid, novel_id: novelId, cadence: 'weekly', enabled: true })
+        })
+
+        // Small snapshot batches also handle exports containing unusually large metadata fields.
+        for (const snapshotBatch of chunks(snapshotRows, 10)) {
+          const inserted = await supabase.from('metric_snapshots').insert(snapshotBatch)
+          if (inserted.error) throw inserted.error
+          snapshotsSaved += snapshotBatch.length
+        }
+        for (const exclusionBatch of chunks(exclusionRows, 100)) {
+          const savedExclusions = await supabase.from('benchmark_exclusions').upsert(exclusionBatch, { onConflict: 'user_id,novel_id' })
+          if (savedExclusions.error) throw savedExclusions.error
+        }
+        for (const watchBatch of chunks(watchRows, 100)) {
+          const savedWatch = await supabase.from('watchlist').upsert(watchBatch, { onConflict: 'user_id,novel_id' })
+          if (savedWatch.error) throw savedWatch.error
+        }
       }
-      const saved = records.length ? await supabase.from('novels').select('id,fiction_url').eq('user_id', uid).in('fiction_url', records.map(x => x.fiction_url)) : { data: [], error: null }
-      if (saved.error) throw saved.error
-      const idByUrl = new Map((saved.data || []).map(x => [x.fiction_url, x.id]))
-      const snapshotRows: any[] = []
-      const exclusionRows: any[] = []
-      const watchRows: any[] = []
-      sourceRows.forEach(({ row, url }) => {
-        const novelId = idByUrl.get(url)
-        if (!novelId) return
-        const metrics: Record<string, number | null> = {
-          views: numberValue(row.views ?? row.total_views), followers: numberValue(row.followers), favorites: numberValue(row.favorites),
-          rating: numberValue(row.rating ?? row.overall_rating ?? row.overall_score ?? row.overallscore), rating_count: numberValue(row.rating_count ?? row.ratings_count), review_count: numberValue(row.review_count),
-          average_views: numberValue(row.average_views), chapters: numberValue(row.chapters ?? row.chapter_count), pages: numberValue(row.pages ?? row.page_count),
-        }
-        const extendedMetrics = {
-          word_count: numberValue(row.word_count ?? row.words ?? row.wordcount),
-          overall_score: numberValue(row.overall_score ?? row.overall_rating ?? row.overallscore),
-          style_score: numberValue(row.style_score ?? row.style_rating ?? row.stylescore),
-          story_score: numberValue(row.story_score ?? row.story_rating ?? row.storyscore),
-          grammar_score: numberValue(row.grammar_score ?? row.grammar_rating ?? row.grammarscore),
-          character_score: numberValue(row.character_score ?? row.character_rating ?? row.characterscore),
-        }
-        if (metricKeys.some(k => metrics[k] !== null) || Object.values(extendedMetrics).some(v => v !== null)) {
-          snapshotRows.push({ user_id: uid, novel_id: novelId, source_type: 'file_import', ...metrics, raw_data: { ...row, ...extendedMetrics } })
-        }
-        const title = String(row.title || '').toLowerCase()
-        if (url.includes('/fiction/183032') || title.includes('dungeons in denver')) exclusionRows.push({ user_id: uid, novel_id: novelId, reason: 'User-owned novel; excluded from benchmark calculations.' })
-        if (watchImported) watchRows.push({ user_id: uid, novel_id: novelId, cadence: 'weekly', enabled: true })
-      })
-      if (snapshotRows.length) { const x = await supabase.from('metric_snapshots').insert(snapshotRows); if (x.error) throw x.error }
-      if (exclusionRows.length) { const x = await supabase.from('benchmark_exclusions').upsert(exclusionRows, { onConflict: 'user_id,novel_id' }); if (x.error) throw x.error }
-      if (watchRows.length) { const x = await supabase.from('watchlist').upsert(watchRows, { onConflict: 'user_id,novel_id' }); if (x.error) throw x.error }
     } catch (err) {
-      failures = records.length
+      failures = sourceRows.length
       const message = err instanceof Error ? err.message : 'Import failed.'
       errors.push({ user_id: uid, run_id: runId, row_number: 0, fiction_url: null, error_code: 'IMPORT_FAILED', error_message: message, raw_row: {} })
     }
-    if (errors.length) await supabase.from('ingestion_run_errors').insert(errors)
+
+    for (const errorBatch of chunks(errors, 50)) {
+      const savedErrors = await supabase.from('ingestion_run_errors').insert(errorBatch)
+      if (savedErrors.error) setNotice('Import completed with an error-log issue: ' + savedErrors.error.message)
+    }
     await supabase.from('ingestion_runs').update({
       finished_at: new Date().toISOString(), records_seen: preview.length, records_created: created,
       records_updated: updated, records_skipped: skipped, failures,
       run_status: failures ? 'completed_with_errors' : errors.length ? 'completed_with_errors' : 'completed',
     }).eq('id', runId)
+
     if (!failures) {
-      setNotice(`Import complete: ${created} new, ${updated} updated, ${skipped} skipped; ${preview.length} rows processed.`)
+      setNotice('Import complete: ' + created + ' new, ' + updated + ' updated, ' + skipped + ' skipped; ' + preview.length + ' rows processed; ' + snapshotsSaved + ' metric snapshots saved.')
       setPreview([]); setFile(null); setTab('catalogue'); await loadData()
-    } else setImportError('Import failed: ' + (errors[errors.length - 1]?.error_message || 'unknown error'))
+    } else setImportError('Import stopped after a database error: ' + (errors[errors.length - 1]?.error_message || 'unknown error') + '. Some earlier batches may already have been saved; re-importing is safe for novel records.')
     setImportBusy(false)
   }
 
