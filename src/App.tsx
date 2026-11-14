@@ -342,7 +342,7 @@ export default function App() {
         setImportError('The page was readable, but no fiction URLs were detected. Royal Road may have changed its markup.')
       } else {
         const urls = result.fictions.map((item: { url: string }) => item.url)
-        setScrapeInput(old => [...new Set([...old.split(/[\\s,]+/).filter(Boolean), ...urls])].join('\\n'))
+        setScrapeInput(old => [...new Set([...old.split(/[\s,]+/).filter(Boolean), ...urls])].join('\n'))
         setNotice(`Extracted ${urls.length} fiction URLs from Latest Updates page ${page}. Review the list, then start the scrape.`)
       }
     } catch (error) {
@@ -353,7 +353,7 @@ export default function App() {
 
   async function runScrape() {
     if (!session?.user?.id || scrapeBusy) return
-    const urls = [...new Set(scrapeInput.split(/[\\s,]+/).map(value => value.trim()).filter(Boolean))]
+    const urls = [...new Set(scrapeInput.split(/[\s,]+/).map(value => value.trim()).filter(Boolean))]
     if (!urls.length) { setImportError('Enter at least one Royal Road fiction URL.'); return }
     if (urls.length > 500) { setImportError('The limit is 500 fiction URLs per scrape batch.'); return }
     setScrapeBusy(true); setImportError(''); setNotice('')
@@ -529,29 +529,47 @@ export default function App() {
           {preview.length > 0 && <div className="panel preview-panel"><div className="panel-heading"><div><h2>Import preview</h2><p>Showing the first five rows.</p></div><span className="pill">{preview.length} rows</span></div><div className="table-wrap"><table><thead><tr><th>Title</th><th>Author</th><th>Views</th><th>Followers</th><th>Rating</th></tr></thead><tbody>{preview.slice(0,5).map((r,i)=><tr key={i}><td>{String(r.title || r.url || r.fiction_url || '—')}</td><td>{String(r.author || '—')}</td><td>{fmt(numberValue(r.views))}</td><td>{fmt(numberValue(r.followers))}</td><td>{fmt(numberValue(r.rating))}</td></tr>)}</tbody></table></div></div>}
         </>}
         {tab === 'scrape' && <>
-          <div className="page-heading"><div><p className="eyebrow">DATA INGESTION</p><h1>Royal Road scraper</h1><p className="muted">Fetch public fiction pages and save the metadata and metrics that are visible to this server.</p></div></div>
-          <div className="import-layout">
-            <div className="panel import-panel">
-              <h2>Discover from Latest Updates</h2>
-              <p className="muted">Extract fiction links directly from Royal Road's Latest Updates page. Choose a page, extract its URLs, then scrape them.</p>
-              <div className="toolbar">
-                <label className="small">Page <input type="number" min="1" max="20" value={latestPage} onChange={e => setLatestPage(e.target.value)} disabled={discoverBusy || scrapeBusy}/></label>
-                <button className="secondary" disabled={discoverBusy || scrapeBusy} onClick={() => void discoverLatestUpdates()}>{discoverBusy ? 'Extracting…' : 'Extract fiction URLs'}</button>
+          <div className="page-heading scrape-heading">
+            <div><p className="eyebrow">DATA INGESTION</p><h1>Collection workspace</h1><p className="muted">Build a URL queue, review it, and save any metadata Royal Road makes publicly accessible.</p></div>
+            <div className="scrape-status"><span className="status-dot"/> Manual collection <small>Server access may be restricted</small></div>
+          </div>
+          <div className="scrape-summary">
+            <div><span>URLs queued</span><strong>{scrapeInput.split(/[\s,]+/).filter(Boolean).length}</strong></div>
+            <div><span>Batch limit</span><strong>500</strong></div>
+            <div><span>Request mode</span><strong>Sequential</strong></div>
+          </div>
+          <div className="scrape-workspace">
+            <section className="panel scrape-main">
+              <div className="scrape-section-head"><div><span className="step-number">01</span><div><h2>Discover fiction links</h2><p>Try a Latest Updates page. If Royal Road blocks the server request, add URLs manually or use CSV import.</p></div></div></div>
+              <div className="discover-controls">
+                <label>Latest Updates page<input type="number" min="1" max="20" value={latestPage} onChange={e => setLatestPage(e.target.value)} disabled={discoverBusy || scrapeBusy}/></label>
+                <button className="secondary" disabled={discoverBusy || scrapeBusy} onClick={() => void discoverLatestUpdates()}>{discoverBusy ? 'Checking page…' : 'Extract URLs'}</button>
               </div>
-              <h2>Fiction URLs</h2>
-              <p className="muted">Extracted links appear here; you can also paste URLs manually. Up to 500 per batch. Fiction pages are fetched sequentially with a delay.</p>
-              <textarea className="scrape-input" value={scrapeInput} onChange={e => setScrapeInput(e.target.value)} placeholder={'Extract links above or paste Royal Road fiction URLs, one per line.'} disabled={scrapeBusy}/>
-              <label className="check-row"><input type="checkbox" checked={watchScraped} onChange={e => setWatchScraped(e.target.checked)} disabled={scrapeBusy}/> Add successfully scraped novels to weekly watchlist</label>
-              {scrapeBusy && <div className="scrape-progress"><div><span>Scraping pages</span><b>{scrapeProgress.done} / {scrapeProgress.total}</b></div><div className="progress-track"><i style={{ width: (scrapeProgress.total ? scrapeProgress.done / scrapeProgress.total * 100 : 0) + '%' }}/></div></div>}
-              {importError && <p className="error">{importError}</p>}
-              <button className="primary full" disabled={scrapeBusy || discoverBusy || !scrapeInput.trim()} onClick={() => void runScrape()}>{scrapeBusy ? 'Scraping…' : 'Start scrape'}</button>
-            </div>
-            <div className="panel">
-              <h2>What it collects</h2>
-              <div className="field-list">{['Title and author (when exposed)','Publication date and genre (when exposed)','Chapter count and status (when exposed)','Views, followers, favorites and rating (when exposed)','Timestamped metric snapshots'].map(x => <code key={x}>{x}</code>)}</div>
-              <div className="info-strip compact"><ShieldCheck size={16}/><span>Only ordinary public-page requests are used. HTTP 403, 429, CAPTCHA and other access denials are respected; no proxy rotation or access-control bypass.</span></div>
-              <p className="muted">Royal Road may change its page markup or block server requests. Missing fields are left blank rather than guessed. CSV import remains available as a fallback.</p>
-            </div>
+              <div className="scrape-divider"/>
+              <div className="scrape-section-head"><div><span className="step-number">02</span><div><h2>Review URL queue</h2><p>Paste one fiction URL per line. Duplicate entries are removed before processing.</p></div></div><span className="queue-count">{scrapeInput.split(/[\s,]+/).filter(Boolean).length} / 500</span></div>
+              <textarea className="scrape-input" value={scrapeInput} onChange={e => setScrapeInput(e.target.value)} placeholder={'https://www.royalroad.com/fiction/12345/example\nhttps://www.royalroad.com/fiction/67890/another-example'} disabled={scrapeBusy}/>
+              <div className="scrape-actions">
+                <button className="text-button" disabled={!scrapeInput.trim() || scrapeBusy} onClick={() => { setScrapeInput(''); setImportError(''); setNotice('') }}>Clear queue</button>
+                <button className="primary" disabled={scrapeBusy || discoverBusy || !scrapeInput.trim() || scrapeInput.split(/[\s,]+/).filter(Boolean).length > 500} onClick={() => void runScrape()}>{scrapeBusy ? 'Collecting…' : 'Start collection'}</button>
+              </div>
+              <label className="check-row"><input type="checkbox" checked={watchScraped} onChange={e => setWatchScraped(e.target.checked)} disabled={scrapeBusy}/> Add successfully collected novels to weekly watchlist</label>
+              {scrapeBusy && <div className="scrape-progress"><div><span>Processing queue</span><b>{scrapeProgress.done} / {scrapeProgress.total}</b></div><div className="progress-track"><i style={{ width: (scrapeProgress.total ? scrapeProgress.done / scrapeProgress.total * 100 : 0) + '%' }}/></div></div>}
+              {importError && <div className="scrape-alert"><strong>Collection could not continue</strong><p>{importError}</p>{/403|429|denied|blocked/i.test(importError) && <p>Royal Road is refusing server-side access. This tool will not bypass that restriction. You can still import data you collect manually using the CSV importer.</p>}</div>}
+            </section>
+            <aside className="scrape-side">
+              <div className="panel">
+                <span className="step-number">03</span><h2>What gets saved</h2>
+                <ul className="scrape-checklist"><li>Fiction title and author, when available</li><li>Publication date, genre and chapter data</li><li>Visible views, followers, favorites and rating</li><li>Timestamped snapshots for historical comparison</li></ul>
+              </div>
+              <div className="panel scrape-warning">
+                <h2><ShieldCheck size={17}/> Access limitation</h2>
+                <p>Royal Road may return HTTP 403 or 429 to server requests. A deployment being online does not mean Royal Road will allow the request. No access-control bypass is attempted.</p>
+              </div>
+              <div className="panel">
+                <h2>Manual data import</h2><p className="muted">If Royal Road blocks collection, use the existing CSV importer with data you have gathered yourself.</p>
+                <button className="secondary full" onClick={() => { setTab('import'); setImportError(''); }}>Open CSV importer <ChevronRight size={15}/></button>
+              </div>
+            </aside>
           </div>
         </>}
         {tab === 'statistics' && <>
