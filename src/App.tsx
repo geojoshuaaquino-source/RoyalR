@@ -46,6 +46,8 @@ export default function App() {
   const [password, setPassword] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState('')
+  const [authNotice, setAuthNotice] = useState('')
+  const [canResendConfirmation, setCanResendConfirmation] = useState(false)
   const [tab, setTab] = useState<Tab>('overview')
   const [novels, setNovels] = useState<Novel[]>([])
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
@@ -109,16 +111,54 @@ export default function App() {
     favorites: latestMetrics.reduce((a, s) => a + (s.favorites || 0), 0),
   }), [latestMetrics])
 
+  const emailRedirectTo = () => window.location.origin + '/'
+
   async function signIn(e: React.FormEvent) {
-    e.preventDefault(); setAuthBusy(true); setAuthError('')
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) setAuthError(error.message)
+    e.preventDefault()
+    setAuthBusy(true); setAuthError(''); setAuthNotice(''); setCanResendConfirmation(false)
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+    if (error) {
+      setAuthError(error.message)
+      if (error.message.toLowerCase().includes('email not confirmed')) setCanResendConfirmation(true)
+    }
     setAuthBusy(false)
   }
+
   async function signUp() {
-    setAuthBusy(true); setAuthError('')
-    const { error } = await supabase.auth.signUp({ email, password })
-    setAuthError(error ? error.message : 'Account created. Check your email if confirmation is enabled.')
+    if (!email.trim() || !password) {
+      setAuthError('Enter an email address and password first.')
+      return
+    }
+    setAuthBusy(true); setAuthError(''); setAuthNotice(''); setCanResendConfirmation(false)
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: { emailRedirectTo: emailRedirectTo() },
+    })
+    if (error) {
+      setAuthError(error.message)
+    } else if (data.session) {
+      setAuthNotice('Account created and signed in.')
+    } else {
+      setAuthNotice('Signup accepted. Check your inbox and spam folder for the confirmation email, then open its link on this site.')
+      setCanResendConfirmation(true)
+    }
+    setAuthBusy(false)
+  }
+
+  async function resendConfirmation() {
+    if (!email.trim()) {
+      setAuthError('Enter the email address you used to sign up.')
+      return
+    }
+    setAuthBusy(true); setAuthError(''); setAuthNotice('')
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: email.trim(),
+      options: { emailRedirectTo: emailRedirectTo() },
+    })
+    if (error) setAuthError(error.message)
+    else setAuthNotice('If this address has a pending signup, Supabase has accepted a new confirmation request. Check your inbox and spam folder.')
     setAuthBusy(false)
   }
   async function signOut() { await supabase.auth.signOut(); setNovels([]); setSnapshots([]); setWatchIds([]) }
@@ -226,8 +266,10 @@ export default function App() {
     <label>Email<input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com"/></label>
     <label>Password<input type="password" required minLength={6} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 6 characters"/></label>
     {authError && <p className="error">{authError}</p>}
+    {authNotice && <p className="success">{authNotice}</p>}
     <button className="primary full" disabled={authBusy}>{authBusy ? 'Please wait…' : 'Sign in'}</button>
     <button type="button" className="text-button full" disabled={authBusy} onClick={signUp}>Create an account</button>
+    {canResendConfirmation && <button type="button" className="text-button full" disabled={authBusy} onClick={resendConfirmation}>Resend confirmation email</button>}
   </form></div>
 
   const nav: { id: Tab; label: string; icon: typeof Activity }[] = [
