@@ -107,6 +107,15 @@ export default function App() {
     for (const s of snapshots) if (!map.has(s.novel_id)) map.set(s.novel_id, s)
     return map
   }, [snapshots])
+  const previousByNovel = useMemo(() => {
+    const map = new Map<string, Snapshot>()
+    const seen = new Set<string>()
+    for (const snapshot of snapshots) {
+      if (seen.has(snapshot.novel_id) && !map.has(snapshot.novel_id)) map.set(snapshot.novel_id, snapshot)
+      seen.add(snapshot.novel_id)
+    }
+    return map
+  }, [snapshots])
 
   const filteredNovels = useMemo(() => novels.filter(n => {
     const q = search.toLowerCase()
@@ -119,6 +128,18 @@ export default function App() {
   ), [novels])
 
   const latestMetrics = useMemo(() => benchmarkNovels.map(n => latestByNovel.get(n.id)).filter(Boolean) as Snapshot[], [benchmarkNovels, latestByNovel])
+  const growthRows = useMemo(() => benchmarkNovels.flatMap(n => {
+    const latest = latestByNovel.get(n.id)
+    const previous = previousByNovel.get(n.id)
+    if (!latest || !previous) return []
+    return [{
+      novel: n,
+      latest,
+      previous,
+      followerChange: latest.followers !== null && previous.followers !== null ? latest.followers - previous.followers : null,
+      viewChange: latest.views !== null && previous.views !== null ? latest.views - previous.views : null,
+    }]
+  }), [benchmarkNovels, latestByNovel, previousByNovel])
   const ageAdjustedRows = useMemo(() => {
     const rows = benchmarkNovels.flatMap(n => {
       const snapshot = latestByNovel.get(n.id)
@@ -381,6 +402,18 @@ export default function App() {
               <tbody>{cohortStats.map(row => <tr key={row.cohort}><td>{row.cohort}</td><td>{fmt(row.count)}</td><td>{fmt(row.followers)}</td><td>{fmt(row.averageViews)}</td><td>{row.conversion === null ? '—' : (row.conversion * 100).toFixed(2) + '%'}</td></tr>)}</tbody>
             </table></div>
             {!ageAdjustedRows.length && <p className="muted">Import publication dates and metric snapshots to calculate age cohorts.</p>}
+          </div>
+          <div className="panel">
+            <div className="panel-heading"><div><h2>Growth since previous snapshot</h2><p>Change between the two most recent imported snapshots per novel; intervals may differ.</p></div></div>
+            <div className="table-wrap"><table><thead><tr><th>Novel</th><th>Latest capture</th><th>Follower change</th><th>View change</th></tr></thead>
+              <tbody>{[...growthRows].sort((x,y)=>(y.followerChange ?? -Infinity)-(x.followerChange ?? -Infinity)).slice(0,10).map(row => <tr key={row.novel.id}>
+                <td><a className="novel-title" href={row.novel.fiction_url} target="_blank" rel="noreferrer">{row.novel.title}</a><small>{row.novel.author_name || 'Unknown author'}</small></td>
+                <td>{dateFmt(row.latest.captured_at)}</td>
+                <td>{row.followerChange === null ? '—' : (row.followerChange > 0 ? '+' : '') + fmt(row.followerChange)}</td>
+                <td>{row.viewChange === null ? '—' : (row.viewChange > 0 ? '+' : '') + fmt(row.viewChange)}</td>
+              </tr>)}</tbody>
+            </table></div>
+            {!growthRows.length && <p className="muted">A novel needs at least two metric snapshots before its growth can be calculated.</p>}
           </div>
           <div className="panel">
             <div className="panel-heading"><div><h2>Age-adjusted follower ranking</h2><p>Percentile compares followers only against novels in the same age cohort.</p></div></div>
