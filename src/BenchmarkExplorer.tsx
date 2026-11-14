@@ -47,7 +47,6 @@ const getUserMetric = (novel: UserNovel, snapshot: UserSnapshot | undefined, key
   if (key === 'f') return snapshot.followers
   if (key === 'fav') return snapshot.favorites
   if (key === 'rc') return snapshot.rating_count
-  if (key === 'r') return snapshot.rating ?? rawMetric('overall_score', 'overallScore')
   const raw = snapshot.raw_data || {}
   const rawMetric = (...keys: string[]) => {
     for (const name of keys) {
@@ -59,6 +58,7 @@ const getUserMetric = (novel: UserNovel, snapshot: UserSnapshot | undefined, key
     }
     return null
   }
+  if (key === 'r') return snapshot.rating ?? rawMetric('overall_score', 'overallScore')
   if (key === 'w') return rawMetric('word_count', 'wordCount', 'words')
   if (key === 'st') return rawMetric('style_score', 'styleScore')
   if (key === 'sr') return rawMetric('story_score', 'storyScore')
