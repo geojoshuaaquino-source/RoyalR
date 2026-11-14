@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
+import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
 
 type UserNovel = { id: string; title: string; fiction_url: string; published_at: string | null; page_count: number | null; chapter_count: number | null }
 type UserSnapshot = { views: number | null; average_views: number | null; followers: number | null; favorites: number | null; rating: number | null; rating_count: number | null; chapters: number | null; pages: number | null; raw_data: Record<string, unknown> | null; captured_at: string }
@@ -89,7 +89,8 @@ const summary = (values: number[]) => {
 const cohort = (age: number) => age <= 90 ? '0–90 days' : age <= 180 ? '91–180 days' : age <= 270 ? '181–270 days' : age <= 360 ? '271–360 days' : '361+ days'
 const ageOf = (publishedAt: string | null) => publishedAt ? Math.max(0, Math.floor((Date.now() - new Date(publishedAt).getTime()) / 86400000)) : null
 
-export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: UserNovel[]; latestByNovel: Map<string, UserSnapshot> }) {
+type CreateNovelInput = { title: string; url: string; publishedAt: string; genre: string; tags: string; metrics: Record<string, number | null> }
+export default function BenchmarkExplorer({ novels, latestByNovel, onCreateNovel }: { novels: UserNovel[]; latestByNovel: Map<string, UserSnapshot>; onCreateNovel: (input: CreateNovelInput) => Promise<string> }) {
   const [baseline, setBaseline] = useState<Row[]>([])
   const [genreFilter, setGenreFilter] = useState('All genres')
   const [typeFilter, setTypeFilter] = useState('All types')
@@ -101,6 +102,15 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
   const [selectedNovelId, setSelectedNovelId] = useState('')
   const [xMetric, setXMetric] = useState('av')
   const [yMetric, setYMetric] = useState('f')
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createBusy, setCreateBusy] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const [draftTitle, setDraftTitle] = useState('')
+  const [draftUrl, setDraftUrl] = useState('')
+  const [draftPublishedAt, setDraftPublishedAt] = useState('')
+  const [draftGenre, setDraftGenre] = useState('')
+  const [draftTags, setDraftTags] = useState('')
+  const [draftMetrics, setDraftMetrics] = useState<Record<string, string>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -154,7 +164,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
   const ownValue = selectedNovel ? getUserMetric(selectedNovel, selectedSnapshot, metricKey) : null
   const allMetricValues = categoryFiltered.map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
   const stats = summary(values)
-  const rawPct = ownValue == null ? null : percentile(allMetricValues, ownValue)
+  const rawPct = ownValue == null ? null : percentile(values, ownValue)
   const agePeers = selectedAge == null ? [] : categoryFiltered.filter(r => Math.floor((r.age - 1) / 30) === Math.floor((selectedAge - 1) / 30)).map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
   const agePct = ownValue == null ? null : percentile(agePeers, ownValue)
 
@@ -167,7 +177,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
       const lo = min + i * step, hi = i === binCount - 1 ? max : lo + step
       const count = transformed.filter(v => v >= lo && (i === binCount - 1 ? v <= hi : v < hi)).length
       const inverse = (v: number) => metric.log ? Math.pow(10, v) - 1 : v
-      return { index: i, range: fmt(inverse(lo)) + '–' + fmt(inverse(hi)), count }
+      return { index: i, range: fmt(inverse(lo)) + '–' + fmt(inverse(hi)), count, midpoint: (lo + hi) / 2 }
     })
   }, [values, metric.log])
   const markerIndex = ownValue == null || !values.length ? null : (() => {
@@ -199,7 +209,37 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
   if (!baseline.length) return <div className="panel"><h2>Loading benchmark…</h2><p className="muted">Loading the 410-novel baseline.</p></div>
 
   return <div className="benchmark-explorer">
-    <div className="page-heading"><div><p className="eyebrow">FROZEN REFERENCE DATA · AUG 29, 2026</p><h1>Benchmark explorer</h1><p className="muted">Compare a novel against the 410-novel reference dataset. Filter by genre, fiction type, status, age, or metric. Your own novel is shown separately and never added to the benchmark.</p></div></div>
+    <div className="page-heading"><div><p className="eyebrow">FROZEN REFERENCE DATA · AUG 29, 2026</p><h1>Novel performance</h1><p className="muted">See where your novel ranks against the 410-novel reference dataset. Your novels stay separate from the baseline.</p></div><button className="primary" onClick={() => { setCreateOpen(v => !v); setCreateError('') }}>{createOpen ? 'Close form' : '+ Add my novel'}</button></div>
+    {createOpen && <div className="panel create-novel-panel">
+      <div className="panel-heading"><div><h2>Add a novel to compare</h2><p>Enter its Royal Road URL and latest available metrics. It will be saved to your catalogue, not added to the reference dataset.</p></div></div>
+      <div className="create-novel-grid">
+        <label>Novel title<input value={draftTitle} onChange={e=>setDraftTitle(e.target.value)} placeholder="Novel title" /></label>
+        <label>Royal Road URL<input value={draftUrl} onChange={e=>setDraftUrl(e.target.value)} placeholder="https://www.royalroad.com/fiction/..." /></label>
+        <label>Publication date<input type="date" value={draftPublishedAt} onChange={e=>setDraftPublishedAt(e.target.value)} /></label>
+        <label>Genre<input value={draftGenre} onChange={e=>setDraftGenre(e.target.value)} placeholder="Fantasy, LitRPG…" /></label>
+        <label className="create-tags">Tags<input value={draftTags} onChange={e=>setDraftTags(e.target.value)} placeholder="Comma-separated tags" /></label>
+      </div>
+      <p className="eyebrow create-metrics-label">LATEST METRICS</p>
+      <div className="create-metric-grid">
+        {[
+          ['views','Total views'],['average_views','Average views'],['followers','Followers'],['favorites','Favorites'],
+          ['rating_count','Ratings count'],['rating','Overall rating'],['pages','Pages'],['word_count','Word count'],
+          ['chapters','Chapters'],['overall_score','Overall score'],['style_score','Style score'],['story_score','Story score'],
+          ['grammar_score','Grammar score'],['character_score','Character score']
+        ].map(([key,label])=><label key={key}>{label}<input type="number" min="0" step="any" value={draftMetrics[key] || ''} onChange={e=>setDraftMetrics(old=>({...old,[key]:e.target.value}))} placeholder="—"/></label>)}
+      </div>
+      {createError && <p className="error">{createError}</p>}
+      <div className="create-novel-actions"><span className="muted">You can leave unavailable metrics blank.</span><button className="primary" disabled={createBusy || !draftTitle.trim() || !draftUrl.trim()} onClick={async()=>{
+        setCreateBusy(true); setCreateError('')
+        try {
+          const metrics=Object.fromEntries(Object.entries(draftMetrics).map(([k,v])=>[k,v.trim()===''?null:Number(v)]))
+          if(Object.values(metrics).some(v=>v!==null && (!Number.isFinite(v as number) || (v as number)<0))) throw new Error('Metrics must be non-negative numbers.')
+          const id=await onCreateNovel({title:draftTitle.trim(),url:draftUrl.trim(),publishedAt:draftPublishedAt,genre:draftGenre.trim(),tags:draftTags,metrics})
+          setSelectedNovelId(id); setCreateOpen(false); setDraftTitle(''); setDraftUrl(''); setDraftPublishedAt(''); setDraftGenre(''); setDraftTags(''); setDraftMetrics({})
+        } catch(error) { setCreateError(error instanceof Error?error.message:'Could not save this novel.') }
+        finally { setCreateBusy(false) }
+      }}>{createBusy?'Saving…':'Save and compare'}</button></div>
+    </div>}
     <div className="stat-grid">
       <div className="stat-card"><div className="stat-top"><span>Baseline novels</span></div><strong>{baseline.length}</strong><small>Unique fiction records</small></div>
       <div className="stat-card"><div className="stat-top"><span>Baseline median followers</span></div><strong>{fmt(median(baseline.map(r=>r.f).filter((v):v is number=>v!=null)))}</strong><small>Mean: {fmt(summary(baseline.map(r=>r.f).filter((v):v is number=>v!=null)).mean)}</small></div>
@@ -222,10 +262,10 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
         <div><span>Median</span><strong>{fmt(stats.median)}</strong></div>
         <div><span>Mode</span><strong>{stats.mode}</strong></div>
       </div>
-      <div className="benchmark-chart-head"><div><h2>{metric.label} distribution</h2><p className="muted">Histogram of the selected cohort. Count is the number of novels in each range.</p></div></div>
-      <div className="benchmark-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={histogram} margin={{top:12,right:12,left:0,bottom:24}}><CartesianGrid strokeDasharray="3 3" stroke="#293342"/><XAxis dataKey="range" interval={3} angle={-20} textAnchor="end" height={55} tick={{fill:'#93a0b2',fontSize:10}}/><YAxis allowDecimals={false} tick={{fill:'#93a0b2',fontSize:10}}/><Tooltip contentStyle={{background:'#151e2a',border:'1px solid #344154',borderRadius:8,color:'#eef2f7'}} formatter={(v:any)=>[v,'Novels']}/><Bar dataKey="count" fill="#78bfa0" radius={[4,4,0,0]}/>{markerIndex != null && <ReferenceLine x={histogram[markerIndex]?.range} stroke="#f0b66b" strokeWidth={2} label={{value:'Your novel',fill:'#f0b66b',position:'top'}}/>}</BarChart></ResponsiveContainer></div>
-      {selectedNovel && <div className="benchmark-position"><b>{selectedNovel.title}</b><span>{ownValue == null ? 'This metric is not available for your latest snapshot.' : <>Value: <strong>{fmt(ownValue)}</strong> · Percentile in selected category: <strong>{rawPct?.toFixed(1)}th</strong>{agePct == null ? '' : <> · Within its 30-day age band: <strong>{agePct.toFixed(1)}th</strong></>}</>}</span></div>}
-      <p className="benchmark-note">Counts and percentiles use available values only. The distribution is highly skewed for several metrics, so the graph uses log-spaced bins for count metrics; it does not assume a normal distribution. The follower-to-average-view ratio is a comparison proxy, not a true visitor-to-follower conversion rate.</p>
+      <div className="benchmark-chart-head"><div><h2>{metric.label} distribution curve</h2><p className="muted">Observed frequency across the selected cohort. This is an empirical curve, not an assumed normal bell curve.</p></div></div>
+      <div className="benchmark-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={histogram} margin={{top:16,right:14,left:0,bottom:28}}><CartesianGrid strokeDasharray="3 3" stroke="#293342"/><XAxis dataKey="range" interval={3} angle={-20} textAnchor="end" height={58} tick={{fill:'#93a0b2',fontSize:10}}/><YAxis allowDecimals={false} tick={{fill:'#93a0b2',fontSize:10}}/><Tooltip contentStyle={{background:'#151e2a',border:'1px solid #344154',borderRadius:8,color:'#eef2f7'}} formatter={(v:any)=>[v,'Novels']}/><Line type="monotone" dataKey="count" stroke="#78bfa0" strokeWidth={2.5} dot={{r:2.5,fill:'#78bfa0'}} activeDot={{r:5}} isAnimationActive={false}/>{markerIndex != null && <ReferenceLine x={histogram[markerIndex]?.range} stroke="#f0b66b" strokeWidth={2} label={{value:'Your novel',fill:'#f0b66b',position:'top'}}/>}</LineChart></ResponsiveContainer></div>
+      {selectedNovel && <div className="benchmark-position benchmark-percentile"><div><b>{selectedNovel.title}</b><span>{ownValue == null ? 'This metric is missing from the latest snapshot.' : <>Your value: <strong>{fmt(ownValue)}</strong></>}</span></div><div className="percentile-score">{rawPct == null ? '—' : rawPct.toFixed(1)+'th'}<small>percentile in current comparison</small></div><div className="percentile-detail">{agePct == null ? 'Age-adjusted percentile unavailable' : agePct.toFixed(1)+'th percentile in its 30-day age band'}</div></div>}
+      <p className="benchmark-note">Counts and percentiles use available values only. The curve uses log-spaced bins for count metrics because the observed distributions are highly skewed; it does not assume a normal distribution. The follower-to-average-view ratio is a comparison proxy, not a true visitor-to-follower conversion rate.</p>
     </div>
     <div className="panel">
       <div className="panel-heading"><div><h2>Combine two metrics</h2><p>Explore how two measures relate across the same benchmark novels.</p></div></div>
