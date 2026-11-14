@@ -3,7 +3,7 @@ import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Scatt
 
 type UserNovel = { id: string; title: string; fiction_url: string; published_at: string | null; page_count: number | null; chapter_count: number | null }
 type UserSnapshot = { views: number | null; average_views: number | null; followers: number | null; favorites: number | null; rating: number | null; rating_count: number | null; chapters: number | null; pages: number | null; captured_at: string }
-type Row = { age: number; v: number | null; av: number | null; f: number | null; fav: number | null; rc: number | null; p: number | null; w: number | null; ch: number | null; r: number | null; st: number | null; sr: number | null; g: number | null; c: number | null }
+type Row = { age: number; v: number | null; av: number | null; f: number | null; fav: number | null; rc: number | null; p: number | null; w: number | null; ch: number | null; r: number | null; st: number | null; sr: number | null; g: number | null; c: number | null; genres: string[]; tags: string[]; status: string; fictionType: string }
 type Metric = { key: string; label: string; short: string; log?: boolean }
 const METRICS: Metric[] = [
   { key: 'v', label: 'Total views', short: 'Views', log: true },
@@ -69,6 +69,9 @@ const ageOf = (publishedAt: string | null) => publishedAt ? Math.max(0, Math.flo
 
 export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: UserNovel[]; latestByNovel: Map<string, UserSnapshot> }) {
   const [baseline, setBaseline] = useState<Row[]>([])
+  const [genreFilter, setGenreFilter] = useState('All genres')
+  const [typeFilter, setTypeFilter] = useState('All types')
+  const [statusFilter, setStatusFilter] = useState('All statuses')
   const [loadError, setLoadError] = useState('')
   const [metricKey, setMetricKey] = useState('f')
   const [ageFilter, setAgeFilter] = useState('all')
@@ -86,11 +89,16 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
         const bytes = Uint8Array.from(atob(encoded), c => c.charCodeAt(0))
         const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
         const csv = await new Response(stream).text()
-        const rows = csv.trim().split(/\r?\n/).map(line => {
+        const categoryResponse = await fetch('/benchmark-categories.json.gz.b64')
+        if (!categoryResponse.ok) throw new Error('Could not load benchmark categories.')
+        const categoryBytes = Uint8Array.from(atob((await categoryResponse.text()).trim()), c => c.charCodeAt(0))
+        const categoryStream = new Blob([categoryBytes]).stream().pipeThrough(new DecompressionStream('gzip'))
+        const categories = JSON.parse(await new Response(categoryStream).text()) as Array<{ genres: string[]; tags: string[]; status: string; fictionType: string }>
+        const rows = csv.trim().split(/\r?\n/).map((line, index) => {
           const values = line.split(',')
           const row: Record<string, number | null> = {}
           COLUMNS.forEach((key, i) => row[key] = values[i] === '' || values[i] === undefined ? null : Number(values[i]))
-          return row as Row
+          return { ...row, ...(categories[index] || { genres: [], tags: [], status: 'Unknown', fictionType: 'Unknown' }) } as Row
         })
         if (!cancelled) setBaseline(rows)
       } catch (error) {
@@ -112,14 +120,18 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
   const selectedSnapshot = selectedNovel ? latestByNovel.get(selectedNovel.id) : undefined
   const selectedAge = selectedNovel ? ageOf(selectedNovel.published_at) : null
   const activeAge = AGE_FILTERS.find(x => x.value === ageFilter) || AGE_FILTERS[0]
-  const filtered = useMemo(() => baseline.filter(r => activeAge.test(r.age)), [baseline, activeAge])
+  const genres = [...new Set(baseline.flatMap(r => r.genres || []))].sort()
+  const types = [...new Set(baseline.map(r => r.fictionType).filter(Boolean))].sort()
+  const statuses = [...new Set(baseline.map(r => r.status).filter(Boolean))].sort()
+  const categoryFiltered = baseline.filter(r => (genreFilter === 'All genres' || r.genres.includes(genreFilter)) && (typeFilter === 'All types' || r.fictionType === typeFilter) && (statusFilter === 'All statuses' || r.status === statusFilter))
+  const filtered = useMemo(() => categoryFiltered.filter(r => activeAge.test(r.age)), [baseline, activeAge, genreFilter, typeFilter, statusFilter])
   const metric = METRICS.find(m => m.key === metricKey) || METRICS[2]
   const values = filtered.map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
   const ownValue = selectedNovel ? getUserMetric(selectedNovel, selectedSnapshot, metricKey) : null
-  const allMetricValues = baseline.map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
+  const allMetricValues = categoryFiltered.map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
   const stats = summary(values)
   const rawPct = ownValue == null ? null : percentile(allMetricValues, ownValue)
-  const agePeers = selectedAge == null ? [] : baseline.filter(r => Math.floor((r.age - 1) / 30) === Math.floor((selectedAge - 1) / 30)).map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
+  const agePeers = selectedAge == null ? [] : categoryFiltered.filter(r => Math.floor((r.age - 1) / 30) === Math.floor((selectedAge - 1) / 30)).map(r => getMetric(r, metricKey)).filter((v): v is number => v != null && Number.isFinite(v))
   const agePct = ownValue == null ? null : percentile(agePeers, ownValue)
 
   const histogram = useMemo(() => {
@@ -152,7 +164,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
   const ownScatter = ownX == null || ownY == null ? [] : [{ x: ownX, y: ownY, name: selectedNovel?.title }]
   const ageGroups = ['1–90 days','91–180 days','181–270 days','271–360 days','361+ days']
   const ageRows = ageGroups.map(group => {
-    const peers = baseline.filter(r => cohort(r.age) === group)
+    const peers = categoryFiltered.filter(r => cohort(r.age) === group)
     const f = peers.map(r=>r.f).filter((v):v is number=>v!=null)
     const av = peers.map(r=>r.av).filter((v):v is number=>v!=null)
     const rate = peers.map(r=>getMetric(r,'followRate')).filter((v):v is number=>v!=null)
@@ -163,7 +175,7 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
   if (!baseline.length) return <div className="panel"><h2>Loading benchmark…</h2><p className="muted">Loading the 410-novel baseline.</p></div>
 
   return <div className="benchmark-explorer">
-    <div className="page-heading"><div><p className="eyebrow">FROZEN REFERENCE DATA · AUG 29, 2026</p><h1>Benchmark explorer</h1><p className="muted">Compare a novel against the 410-novel reference dataset. Your own novel is shown separately and never added to the benchmark.</p></div></div>
+    <div className="page-heading"><div><p className="eyebrow">FROZEN REFERENCE DATA · AUG 29, 2026</p><h1>Benchmark explorer</h1><p className="muted">Compare a novel against the 410-novel reference dataset. Filter by genre, fiction type, status, age, or metric. Your own novel is shown separately and never added to the benchmark.</p></div></div>
     <div className="stat-grid">
       <div className="stat-card"><div className="stat-top"><span>Baseline novels</span></div><strong>410</strong><small>Unique fiction records</small></div>
       <div className="stat-card"><div className="stat-top"><span>Baseline median followers</span></div><strong>{fmt(median(baseline.map(r=>r.f).filter((v):v is number=>v!=null)))}</strong><small>Mean: {fmt(summary(baseline.map(r=>r.f).filter((v):v is number=>v!=null)).mean)}</small></div>
@@ -172,6 +184,9 @@ export default function BenchmarkExplorer({ novels, latestByNovel }: { novels: U
     </div>
     <div className="panel">
       <div className="benchmark-controls">
+        <label>Genre category<select value={genreFilter} onChange={e=>setGenreFilter(e.target.value)}><option>All genres</option>{genres.map(g=><option key={g}>{g}</option>)}</select></label>
+        <label>Fiction type<select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}><option>All types</option>{types.map(t=><option key={t}>{t}</option>)}</select></label>
+        <label>Publication status<select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option>All statuses</option>{statuses.map(s=><option key={s}>{s}</option>)}</select></label>
         <label>Novel to compare<select value={selectedNovelId} onChange={e=>setSelectedNovelId(e.target.value)}><option value="">Select a novel</option>{novels.map(n=><option key={n.id} value={n.id}>{n.title}</option>)}</select></label>
         <label>Metric<select value={metricKey} onChange={e=>setMetricKey(e.target.value)}>{METRICS.map(m=><option key={m.key} value={m.key}>{m.label}</option>)}</select></label>
         <label>Age cohort<select value={ageFilter} onChange={e=>setAgeFilter(e.target.value)}>{AGE_FILTERS.map(a=><option key={a.value} value={a.value}>{a.label}</option>)}</select></label>
